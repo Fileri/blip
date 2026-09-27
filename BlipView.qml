@@ -3951,10 +3951,10 @@ FocusScope {
                   }
                   var empty = text.length === 0
                   // Ordinary editing keys belong to the draft, including at
-                  // its boundaries. History selection uses Page Up/Page Down.
+                  // its boundaries. History selection uses Page Up/Page Down,
+                  // and these leave it alone, as typing does.
                   if (event.key === Qt.Key_Up || event.key === Qt.Key_Down
                       || event.key === Qt.Key_Home || event.key === Qt.Key_End) {
-                    root.clearBubbleCursor()
                     event.accepted = composeField.moveAtBoundary(event.key, event.modifiers)
                     return
                   }
