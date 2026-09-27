@@ -509,16 +509,20 @@ iMessage. A never-iMessage RCS/SMS thread stays green. A failed iMessage to
 a phone still flips to SMS so the send does not stick. Groups are unchanged
 (they send by chat id). Default is off.
 
-**Tapbacks (experimental, Mac side only so far).** `imsg-react` adds or
-removes a classic tapback (❤️ 👍 👎 😂 ‼️ ❓) on one message by performing
-Messages' own tapback action through Accessibility, the grant `imsg-read`
-already holds. Those actions are named in the Mac's language and Apple may
-rename them, so it is off unless you turn it on:
+**Tapbacks (experimental).** Right-click a message, or select it
+(`Shift+PgUp`) and press `Ctrl+E`: the six classic tapbacks (❤️ 👍 👎 😂 ‼️ ❓)
+lead the menu, yours highlighted, and `1`–`6` (or `←`/`→` and `Enter`) pick one; choosing yours again
+takes it back. Behind it, `imsg-react` performs Messages' own tapback action on the
+Mac through Accessibility, the grant `imsg-read` already holds. Those actions
+are named in the Mac's language and Apple may rename them, so the menu row and
+the tool are off unless you turn them on:
 
 ```
 # ~/.config/blip/bridge.conf
 tapbacks=on
 ```
+
+From a terminal:
 
 ```sh
 imsg-react --guid <message GUID> love          # dry run: says what it would do
@@ -526,9 +530,11 @@ imsg-react --guid <message GUID> love --yes    # does it
 imsg-react --guid <message GUID> love --remove --yes
 ```
 
-Success is the tapback row appearing in `chat.db`, never the screen. A bubble
-that does not offer the action is reported and left alone; there is no guess
-at a neighbouring action and no blind retry. It works on 1:1 conversations and
+Success is the tapback row appearing in `chat.db`, never the screen. Your
+choice shows on the bubble at once, dimmed, until the conversation reloads with
+what `chat.db` says; a failure takes it away and says why on the status line,
+once. A bubble that does not offer the action is reported
+and left alone; there is no guess at a neighbouring action and no blind retry. It works on 1:1 conversations and
 text bubbles only (no groups, pictures, links or cards yet), with an
 English-language Mac. Messages comes to the front for a few seconds while it
 runs: anyone typing on the Mac just then types into that conversation, as with
@@ -724,6 +730,7 @@ cards are not edited or merged. See [contact saving setup](docs/SAVE-CONTACT.md)
 | thread | `↑` / `↓` | move through draft lines; on the first / last visual line, jump to the beginning / end of the draft |
 | thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected) | open its attachment or link · copy its text, or the picture itself when the bubble is only a picture · quote it into the compose field (`> …`) |
 | thread | `PgUp` / `PgDn` (Fn+`↑`/`↓` on a Mac keyboard) | select the topmost / bottommost visible bubble, then a screen further each press — also with text in the compose field, since they move no caret |
+| thread | `Ctrl+E` (bubble selected) · `1`–`6` or `←`/`→` + `Enter` | the message menu under the bubble · with `tapbacks=on`, the tapback with that number, or the one the arrows marked (the one you have takes it back) |
 | thread | `Shift+PgUp` / `Shift+PgDn` | one bubble at a time from anywhere in a draft, without moving the caret first |
 | thread | `Home` / `End` · `Ctrl+Home` / `Ctrl+End` | start / end of the current line · start / end of the whole draft |
 | thread | `Esc` | back to list (or clear a text selection first) |
@@ -877,14 +884,12 @@ The 273,000-message history stays on the Mac where it lives.
 
 ## What it can't do
 
-- **Send tapbacks, edits, or threaded replies.** Blip *displays* all three and
-  does not send any of them. The reason is narrower than this file used to
-  claim: it is not that SIP-off code injection is required. macOS 26 Messages
-  has real menu items for three of them, and a menu item is scriptable through
-  the same Accessibility grant `imsg-read` already uses with SIP on. What is
-  unsolved is selecting an arbitrary bubble from Linux, and a group cannot be
-  addressed at all. Typing indicators have no menu item and stay out. See
-  issue #69 for the live work; nothing from it is in the tree.
+- **Send edits or threaded replies.** Blip *displays* both and sends neither.
+  Tapbacks are the opt-in exception (above): not SIP-off code injection, but
+  Messages' own action on the bubble, through the Accessibility grant
+  `imsg-read` already uses with SIP on. It reaches 1:1 text bubbles only; a
+  group cannot be addressed yet. Typing indicators have no action at all and
+  stay out. Issue #69 has the history.
   (Showing *their* receipts on your messages works fine — that's in.)
 - **Work without a Mac, or while the Mac sleeps.** Inherent to the approach.
   The widget dims and tells you.

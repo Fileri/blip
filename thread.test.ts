@@ -731,3 +731,30 @@ describe("Send Later bubbles", () => {
     expect(b!.scheduled).toBeUndefined();
   });
 });
+
+describe("tapback targets", () => {
+  test("a bubble carries its row's GUID, or \"\" without one", () => {
+    const out = decorate([msg({ guid: "p-1" }), msg({ ts: "2026-08-30T12:01:00Z" })], "2026-08-30");
+    expect(out.map((b) => b.guid)).toEqual(["p-1", ""]);
+  });
+
+  test("in the self-thread every tapback is yours, and its echo folds into it", () => {
+    // Messages writes your tapback there as an inbound row from your own
+    // address; the menu has to know it is yours to offer taking it back.
+    const self = "+15551234567";
+    const out = selectThread(
+      [msg({
+        chat: self, from_me: true, text: "note",
+        tapbacks: [{ emoji: "❤️", from_me: false, by: "Me" }, { emoji: "❤️", from_me: true, by: null }],
+      })],
+      self, false, 80, [self],
+    );
+    expect(out[0]!.tapbacks).toEqual([{ emoji: "❤️", from_me: true, by: null }]);
+  });
+
+  test("anywhere else a tapback stays whoever's it was", () => {
+    const them = [{ emoji: "👍", from_me: false, by: "Test Person" }];
+    const out = selectThread([msg({ tapbacks: them })], "+15551234567", false, 80, []);
+    expect(out[0]!.tapbacks).toEqual(them);
+  });
+});

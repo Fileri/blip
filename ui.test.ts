@@ -505,9 +505,12 @@ describe("QML safety invariants", () => {
   });
 
   test("draft navigation keeps normal caret movement and clears history selection", () => {
-    // The selection is a target for actions; it must never outlive the rows
-    // it indexes (a reload renumbers them) and Esc must drop it before leaving.
-    expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
+    // The selection is a target for actions; its index must never outlive the
+    // rows it indexes (a reload renumbers them) and Esc must drop it before
+    // leaving. A reload clears it and finds the same bubble again by guid only.
+    const reload = panel.slice(panel.indexOf("onBubblesChanged: {"), panel.indexOf("property bool pinToBottom"));
+    expect(reload).toContain("clearBubbleCursor()");
+    expect(qmlFunction("restoreBubbleCursor")).toContain("MessageActions.bubbleIndexByGuid(bubbles, guid)");
     // the band and the list rows take the theme's hover-cursor colour/alpha through
     // one property, like Omarchy's own rows; its default is never copied by hand
     expect(panel).toContain("readonly property color hoverFill: Style.hoverFillFor(foreground, accent)");

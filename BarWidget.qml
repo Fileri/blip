@@ -6,6 +6,7 @@ import qs.Ui
 import Quickshell.Hyprland
 import "BinDir.mjs" as BinDir
 import "ScreenLeader.mjs" as ScreenLeader
+import "TapbackActions.mjs" as TapbackActions
 
 // blip — iMessage in the bar.
 //
@@ -52,6 +53,11 @@ BarWidget {
    *  from #115, is unproven on that mouse until Fred's hand says otherwise.
    *  Touchpads are never animated. Parsed with the other keys below. */
   property bool smoothScroll: false
+  /** `tapbacks=on` in bridge.conf: the message menu offers the six classic
+   *  tapbacks, sent through the Mac's imsg-react (#69). OFF by default: it
+   *  drives Messages through Accessibility, by action names Apple can rename.
+   *  The shim refuses the tool without the same key. */
+  property bool tapbacks: false
 
   // ---- collector state
   property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]
@@ -942,9 +948,10 @@ BarWidget {
       root.scrollGain = root.parseGain(t, /^\s*scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.touchpadScrollGain = root.parseGain(t, /^\s*touchpad_scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.smoothScroll = /^\s*smooth_scroll\s*=\s*['"]?(on|true|1|yes)\b/mi.test(t)
+      root.tapbacks = TapbackActions.tapbacksOn(t)
       root.bridgeConfLoaded = true
     }
-    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
+    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.tapbacks = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
   }
   IpcHandler {
     target: root.moduleName
@@ -959,6 +966,7 @@ BarWidget {
         + " autofill=" + (root.otpAutofill ? (otp.ready ? "ready" : "starting") : "off")
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.smoothScroll ? " smooth_scroll=on" : "")
+        + (root.tapbacks ? " tapbacks=on" : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
     function threads(): string { return root.automationOn ? JSON.stringify(root.threads) : root.automationOff }

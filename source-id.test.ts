@@ -8,7 +8,7 @@ import { buildThreads, chatKey, fetchChatRows, unreadCounts, type ImsgMessage } 
 import { DEFAULT_FORMATS, loadThread } from "./thread";
 
 const DIR = "/home/u/bin";
-const TOOLS = ["imsg", "imsg-send", "imsg-read"] as const;
+const TOOLS = ["imsg", "imsg-send", "imsg-read", "imsg-react"] as const;
 // Every id shape the Mac hands out (DM phone, DM email, group GUID, chat<rowid>,
 // short-code SMS), and shapes it never does.
 const MAC_IDS = ["+15551234567", "15551234567", "someone@example.com", "0123456789abcdef0123456789abcdef", "chat123456789", "Vhi"];

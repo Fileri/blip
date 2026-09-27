@@ -1,6 +1,7 @@
 import "SendState.mjs" as SendState
 import "MessageActions.mjs" as MessageActions
 import "SourceId.mjs" as SourceId
+import "TapbackActions.mjs" as TapbackActions
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -391,7 +392,16 @@ FocusScope {
   // selection is a TARGET for actions (copy, open, reply), not a scroll state.
   property int bubbleCursor: -1
   property Item bubbleCursorItem: null
-  onBubblesChanged: clearBubbleCursor()   // a reload renumbers the rows
+  // A reload renumbers the rows: the selection follows its bubble by guid
+  // (a tapback landing on it is a reload too), and goes when the bubble does.
+  property string bubbleCursorGuid: ""
+  onBubbleCursorChanged: bubbleCursorGuid = bubbleCursor >= 0 && bubbleCursor < bubbles.length ? String(bubbles[bubbleCursor].guid || "") : ""
+  onBubblesChanged: {
+    var keep = bubbleCursorGuid
+    clearBubbleCursor()
+    // after the Repeater has its new rows, so the row's hasCursor change registers it
+    if (keep !== "") Qt.callLater(root.restoreBubbleCursor, keep)
+  }
   property bool pinToBottom: false   // scroll to the newest bubble once layout settles
   property bool bubbleFocused: false // a bubble's TextEdit has focus (text selection in progress)
   property string threadRunningChat: "" // chat owned by the current threadProc
@@ -404,6 +414,7 @@ FocusScope {
   property int nextSendId: 0
   property int pendingRevision: 0
   property int threadPendingRevision: 0
+  property bool threadTapbackDone: false // this load started after imsg-react exited 0
   property string sendStamp: ""         // local "YYYY-MM-DD HH:mm:ss" the current send was typed at
   // Text sends queue instead of refusing while one is on the wire; each gets
   // its bubble the instant Enter is pressed (see pendingSends).
@@ -589,6 +600,8 @@ FocusScope {
   }
   function showThread(t) {
     messageMenu.close()
+    // a tapback the tool already confirmed is settled by chat.db, not carried along
+    if (root.pendingTapback && root.pendingTapback.done) root.pendingTapback = null
     active = t
     activeLastTs = String(t.last_ts || "")
     bubbles = []
@@ -615,6 +628,7 @@ FocusScope {
     threadRunningChat = pendingThreadChat
     pendingThreadChat = ""
     root.threadPendingRevision = root.pendingRevision
+    root.threadTapbackDone = !!(root.pendingTapback && root.pendingTapback.done)
     var pending = root.pendingSends.filter(function(p) { return p.chat === threadRunningChat })
     threadProc.command = ["bun", root.threadScript, threadRunningChat, "80",
                           "--time-format", root.timeFormat,
@@ -761,6 +775,11 @@ FocusScope {
       scrollConversation(it.y + it.height + margin - flick.height - flick.contentY)
   }
   function clearBubbleCursor() { bubbleCursor = -1; bubbleCursorItem = null }
+  function restoreBubbleCursor(guid) {
+    if (bubbleCursor >= 0) return   // the arrows moved meanwhile
+    var i = MessageActions.bubbleIndexByGuid(bubbles, guid)
+    if (i >= 0) bubbleCursor = i
+  }
   /** Out of the selection and back where reading started: newest at the
    *  bottom, stick re-armed. Down past the newest and Esc both land here. */
   function leaveBubbles() {
@@ -829,6 +848,8 @@ FocusScope {
     property bool mine: false
     property var tapbacks: []
     visible: (tapbacks || []).length > 0
+    // a tapback on its way (tapback-actions.ts shownTapbacks) draws dimmed
+    opacity: (tapbacks || []).some(function(t) { return t.pending === true }) ? 0.45 : 1
     width: Math.ceil(pillText.implicitWidth) + Style.space(12)
     height: Math.ceil(pillText.implicitHeight) + Style.space(8)
     radius: height / 2
@@ -1739,6 +1760,12 @@ FocusScope {
           var d = JSON.parse(text.trim())
           if (d.ok === true) {
             var list = Array.isArray(d.bubbles) ? d.bubbles : []
+            root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, list, root.threadTapbackDone)
+            // the tool is done but chat.db does not show it yet (a self-thread's echo lags): look again
+            if (root.threadTapbackDone && root.pendingTapback && root.pendingTapback.chat === root.threadRunningChat) {
+              root.reloadChat = root.threadRunningChat
+              reloadTimer.restart()
+            }
             var j = JSON.stringify(list)
             // What the eye can now see: the newest ts in THIS snapshot — of
             // real rows; a pending bubble carries this machine's clock.
@@ -1838,6 +1865,27 @@ FocusScope {
       }
       if (belongsHere) composeField.forceActiveFocus()
       Qt.callLater(root.pumpSend)
+    }
+  }
+
+  Process {
+    id: reactProc
+    property string chat: ""  // the conversation this run's tapback is in
+    property string lastErr: ""
+    stderr: StdioCollector { onStreamFinished: reactProc.lastErr = text }
+    onExited: function(code, status) {
+      if (code === 0) {
+        // the thread was left while it ran: nothing on screen is waiting for it
+        if (!root.inThread || String(root.active.chat) !== reactProc.chat) root.pendingTapback = null
+        else if (root.pendingTapback) {
+          root.pendingTapback = Object.assign({}, root.pendingTapback, { done: true })
+          // the tool saw the row in chat.db before it exited: load now, not after reloadTimer
+          root.requestThreadLoad(reactProc.chat)
+        }
+      } else {
+        root.pendingTapback = null
+        root.note = TapbackActions.tapbackFailure(code, reactProc.lastErr)
+      }
     }
   }
 
@@ -3227,6 +3275,8 @@ FocusScope {
                 required property int index
                 readonly property bool mine: modelData.from_me === true
                 readonly property bool hasCursor: root.bubbleCursor === index
+                // with a tapback on its way drawn in (tapback-actions.ts)
+                readonly property var shownTapbacks: TapbackActions.shownTapbacks(modelData, root.pendingTapback)
                 onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow
 
                 Layout.fillWidth: true
@@ -3595,7 +3645,7 @@ FocusScope {
                   Layout.fillWidth: true
                   // a tapback pill overlaps the top edge — leave room for it
                   Layout.topMargin: (modelData.groupStart ? Style.space(6) : 0)
-                                    + ((modelData.tapbacks || []).length > 0 ? Style.space(12) : 0)
+                                    + (bubbleRow.shownTapbacks.length > 0 ? Style.space(12) : 0)
                   visible: !modelData.retracted &&
                            (String(modelData.text || "") !== "" || (modelData.attachments || []).length === 0) &&
                            // a message that is ONLY the URL shows just the card,
@@ -3686,7 +3736,7 @@ FocusScope {
                       }
                     }
 
-                    TapbackPill { mine: bubbleRow.mine; tapbacks: modelData.tapbacks }
+                    TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
                   }
 
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
@@ -3974,6 +4024,7 @@ FocusScope {
                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
                     if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
                     if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
+                    if (event.key === Qt.Key_E && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.openMessageMenuAt(b, root.bubbleCursorItem); return }
                   }
                   if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                       && !(event.modifiers & Qt.ShiftModifier)) {
@@ -4026,7 +4077,38 @@ FocusScope {
   function openMessageMenu(message, url) {
     messageContext = message
     messageMenu.linkUrl = url
+    messageMenu.keyHints = false
     messageMenu.popup()
+  }
+  /** Ctrl+E on the selected bubble: the same menu, under the bubble, with the
+   *  tapbacks' number keys shown. Closing it hands the keys back to the draft. */
+  function openMessageMenuAt(message, item) {
+    messageContext = message
+    messageMenu.linkUrl = ""
+    messageMenu.keyHints = true
+    if (item) messageMenu.popup(item, Math.max(0, (item.width - messageMenu.implicitWidth) / 2), item.height)
+    else messageMenu.popup()
+  }
+
+  // ---- outgoing tapbacks: tapbacks=on in bridge.conf, the Mac's imsg-react
+  // (#69). The tool decides from chat.db and verifies there. The choice is
+  // drawn at once, dimmed, as pendingTapback, until a thread load shows what
+  // chat.db says; a failure takes it away and is said once on the status line.
+  // One at a time: the menu's row is busy until then.
+  readonly property bool tapbacksOn: hostWidget ? hostWidget.tapbacks === true : false
+  property var pendingTapback: null
+  readonly property bool tapbacksBusy: reactProc.running || pendingTapback !== null
+  function sendTapback(message, kind) {
+    if (root.tapbacksBusy || !root.tapbacksOn || !TapbackActions.canTapback(message, root.activeIsGroup)) return
+    reactProc.chat = String(root.active.chat)
+    var current = TapbackActions.myTapback(message)
+    root.pendingTapback = TapbackActions.pendingTapback(reactProc.chat, String(message.guid), kind, current)
+    reactProc.lastErr = ""
+    reactProc.command = SourceId.bridgeArgv(reactProc.chat, "imsg-react", hostWidget ? hostWidget.binDir : root.home + "/bin")
+      .concat(TapbackActions.tapbackArgs(String(message.guid), kind, current))
+    // the dimmed pill says it is on its way; an earlier failure is old news
+    if (root.note.indexOf("tapback not sent") === 0) root.note = ""
+    reactProc.running = true
   }
   MessageMenu {
     id: messageMenu
@@ -4048,7 +4130,14 @@ FocusScope {
     onOpenRequested: function(url) { root.openLink(url) }
     onCopyLinkRequested: function(url) { root.copyText(url) }
     onShareRequested: function(url) { root.openShare(url) }
-    onClosed: root.messageContext = null
+    tapbacksShown: root.tapbacksOn && TapbackActions.canTapback(root.messageContext, root.activeIsGroup)
+    tapbacksBusy: root.tapbacksBusy
+    myTapback: TapbackActions.myTapback(root.messageContext)
+    onTapbackRequested: function(kind) { if (root.messageContext) root.sendTapback(root.messageContext, kind) }
+    onClosed: {
+      root.messageContext = null
+      if (keyHints) composeField.forceActiveFocus()
+    }
   }
 
   property var contactContext: null
