@@ -68,14 +68,39 @@ ATTACHMENT_MIME_SQL = """COALESCE(NULLIF(a.mime_type, ''), CASE a.uti
     END)"""
 
 
+def _pragma_name(row):
+    """Column name from a PRAGMA table_info row, or None if this is not one.
+
+    A sqlite3.Row accepts an integer index; a plain tuple does too. A dict,
+    which is what some tests make execute() return, does not."""
+    if isinstance(row, dict):
+        name = row.get("name")
+        return name if isinstance(name, str) else None
+    try:
+        name = row["name"]
+    except Exception:
+        try:
+            name = row[1]
+        except Exception:
+            return None
+    return name if isinstance(name, str) else None
+
+
 def attachment_mime_sql(con) -> str:
     """MIME expression for an attachment row.
 
     Older chat.db schemas, and the unit-test fixtures, have mime_type and no
-    uti column. Referencing a.uti there aborts the whole chat list."""
-    # Index 1 is the column name for both a bare tuple and a sqlite3.Row.
-    cols = {r[1] for r in con.execute("PRAGMA table_info(attachment)")}
-    return ATTACHMENT_MIME_SQL if "uti" in cols else "a.mime_type"
+    uti column. Referencing a.uti there aborts the whole chat list. A caller
+    that stubs execute() without a real table keeps the UTI expression; the
+    query itself is not run."""
+    try:
+        rows = list(con.execute("PRAGMA table_info(attachment)"))
+    except Exception:
+        return ATTACHMENT_MIME_SQL
+    names = [_pragma_name(r) for r in rows]
+    if not names or any(name is None for name in names):
+        return ATTACHMENT_MIME_SQL
+    return ATTACHMENT_MIME_SQL if "uti" in names else "a.mime_type"
 
 
 CONTACT_HELPER = os.path.expanduser("~/.blip/bin/contact-delete")
