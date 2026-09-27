@@ -20,16 +20,29 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host="${1:-}"
 
 # 0. Linux prerequisites — say exactly what is missing instead of failing later
-missing=()
+# command → Arch package, so the pacman line names only what is missing.
+declare -A pkg_for=([ssh]=openssh [scp]=openssh [bun]=bun [jq]=jq [notify-send]=libnotify [wl-copy]=wl-clipboard [xdg-open]=xdg-utils)
+missing=(); pkgs=()
 for dep in ssh scp bun jq notify-send wl-copy xdg-open; do
-  command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    missing+=("$dep")
+    [[ " ${pkgs[*]} " == *" ${pkg_for[$dep]} "* ]] || pkgs+=("${pkg_for[$dep]}")
+  fi
 done
 if (( ${#missing[@]} )); then
   echo "✗ missing on this machine: ${missing[*]}" >&2
-  echo "  pacman -S --needed openssh bun jq libnotify wl-clipboard xdg-utils   (Omarchy/Arch names)" >&2
+  echo "  sudo pacman -S --needed ${pkgs[*]}   (Omarchy/Arch names), then re-run blip-setup" >&2
   exit 69
 fi
 echo "✓ Linux prerequisites present (ssh scp bun jq notify-send wl-copy xdg-open)"
+# Optional: voice messages. iPhone voice notes are CAF; ffmpeg turns them into
+# Ogg and mpv plays them without a window. Blip works without either, a voice
+# message just will not play.
+optional=()
+for dep in ffmpeg mpv; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"); done
+if (( ${#optional[@]} )); then
+  echo "• optional, for voice messages: sudo pacman -S --needed ${optional[*]}"
+fi
 conf_dir="$HOME/.config/blip"
 conf="$conf_dir/bridge.conf"
 
@@ -169,7 +182,7 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then
   # with the private key in hand. A re-run REPLACES the key's line, so a
   # changed address is one re-run away. Your everyday key is untouched.
   key="$HOME/.ssh/blip_ed25519"
-  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "blip@$(hostname)" -f "$key"
+  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "blip@${HOSTNAME:-$(uname -n)}" -f "$key"
   pub="$(cut -d" " -f1,2 < "$key.pub")"
   seen="$(ssh -n -- "$host" 'printf %s "${SSH_CONNECTION%% *}"')"
   from_opt="$(blip_key_from "$seen")"
@@ -179,7 +192,9 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then
     mv ~/.ssh/authorized_keys.blip.tmp ~/.ssh/authorized_keys"
   if [[ "$(ssh -n -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ControlPath=none "$host" ping 2>/dev/null)" == pong ]] \
      && ! ssh -n -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ControlPath=none "$host" true >/dev/null 2>&1; then
-    if [[ -n "$from_opt" ]]; then echo "✓ dedicated key enrolled: $key can run only the Blip tools on $host, and only from ${from_opt#from=}"
+    if [[ -n "$from_opt" ]]; then
+      from_list="${from_opt#from=\"}"; from_list="${from_list%\",}"
+      echo "✓ dedicated key enrolled: $key can run only the Blip tools on $host, and only from ${from_list//,/ and }"
     else echo "✓ dedicated key enrolled: $key can run only the Blip tools on $host (not pinned to an address: $host is not reached over Tailscale — docs/SECURITY.md shows the manual pin)"; fi
   else
     echo "✗ dedicated key did not confine as expected — check ~/.ssh/authorized_keys on the Mac" >&2; exit 1
@@ -200,7 +215,7 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then
   for attempt in 1 2 3; do
     echo; echo "Checking Mac permissions (attempt $attempt)…"
     # a grant applies to NEW sessions: drop the multiplexed master so the re-check sees it
-    ssh -O exit "$host" >/dev/null 2>&1 || true
+    ssh -O exit "$host" </dev/null >/dev/null 2>&1 || true
     if ssh -n -- "$host" 'python3 "$HOME/.blip/bin/blip-check"'; then granted=1; break; fi
     if [[ $attempt -lt 3 ]]; then
       read -r -p "Grant what is missing on the Mac (an Allow prompt may be on its screen), then press Enter to re-check (or Ctrl-C): " _
@@ -224,7 +239,10 @@ fi
 echo
 # Content-free on purpose: a message body echoed raw into a terminal is an
 # escape-sequence injection vector (audit / war room #53) and a shoulder-surf.
-if out="$("$bin_dir/imsg" --json recent 1 2>&1)"; then
+# stdin closed: the shim's ssh keeps stdin open for sends, and here it swallowed
+# the answers still queued for the prompts below (a piped or agent-run install
+# then hit EOF at the font question and exited 1 after everything worked).
+if out="$("$bin_dir/imsg" --json recent 1 2>&1 </dev/null)"; then
   n="$(printf '%s' "$out" | jq -r 'length' 2>/dev/null || echo "?")"
   echo "✓ bridge is up — $n message(s) readable through the shim"
   echo
@@ -243,7 +261,7 @@ if out="$("$bin_dir/imsg" --json recent 1 2>&1)"; then
     echo "  Neither is required, and Blip ships no fonts. Set ui_font=theme in bridge.conf to always"
     echo "  use the Omarchy family."
     if command -v pacman >/dev/null 2>&1; then
-      read -r -p "Install Inter now with pacman? [y/N] " ans
+      read -r -p "Install Inter now with pacman? [y/N] " ans || ans=""   # no answer (EOF) = no
       case "$ans" in
         [Yy]*) sudo pacman -S --needed --noconfirm inter-font && echo "✓ Inter installed" || echo "  (skipped — install it yourself later)" ;;
         *) echo "  (skipped)" ;;

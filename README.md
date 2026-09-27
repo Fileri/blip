@@ -316,6 +316,9 @@ reports the live value as `scroll_gain=`.
 > commands below, in order, and stop at step 3 until the human confirms the
 > two grants on the Mac. Never send a test message to anyone but the user's
 > own number. Do not edit `~/.ssh/config` beyond what `blip-setup` writes.
+> The wizard reads two answers from stdin (Enter before the permission
+> check, y/N for the Inter font), so `printf '\nn\n' | blip-setup you@mac`
+> runs it unattended once the human has confirmed the grants.
 > Verify with `blip-check`, not by reading `chat.db` yourself. Before
 > changing code, read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md).
 
@@ -323,14 +326,21 @@ reports the live value as `scroll_gain=`.
 `~/.config/omarchy/plugins/nixfred.blip` and adds the bar widget)
 
 ```sh
-omarchy plugin add https://github.com/nixfred/blip.git --enable
+omarchy plugin add https://github.com/nixfred/blip.git --enable --yes
 ```
+
+It installs the current `main`, not a tagged release, so a fresh install
+always has the latest fixes. `--yes` answers Omarchy's "only add plugins you
+trust" prompt; drop it to be asked. Run it from a terminal inside your
+Omarchy session: enabling talks to the running shell, so over a bare ssh
+session it clones the plugin and then stops with `OMARCHY_PATH is not set`.
 
 (Manual alternative: `git clone https://github.com/nixfred/blip
 ~/.config/omarchy/plugins/nixfred.blip`, then step 4.)
 
 **2. Run the wizard** (idempotent — re-run any time; it prints the
-`pacman` line for any missing Linux dependency and stops)
+`pacman` line for exactly the Linux packages you are missing and stops,
+and names `ffmpeg` and `mpv` as optional: voice messages need them)
 
 ```sh
 ~/.config/omarchy/plugins/nixfred.blip/scripts/blip-setup you@your-mac
