@@ -19,7 +19,7 @@ inventory of what lands on disk.
 | `~/.cache/blip/linkpreview/` (0700, files 0600, 7-day TTL) | title, description and picture of pages linked in your messages, for links Messages did not decorate | anything from a page nobody linked you to |
 | `~/.cache/blip/avatars/` (0700, files 0600, 7-day TTL) | contact photos for people in your thread list, named by a hash of the handle; an empty `.none` marker for contacts without one | names, numbers |
 | `$XDG_RUNTIME_DIR/blip/` (tmpfs, 0700) | images pasted into the compose box; a 60s AddressBook dump (`contacts-dump.json`, names, phones, emails) for live new-message search; swept after an hour and gone at logout | message bodies |
-| `~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/contacts`, `~/bin/contact-save` (or `bin_dir=` in `bridge.conf`) | the bridge shim (a bash script) | — |
+| `~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/imsg-react`, `~/bin/contacts`, `~/bin/contact-save` (or `bin_dir=` in `bridge.conf`) | the bridge shim (a bash script) | — |
 
 **Marking a conversation read is visible to the sender.** Blip can now tell
 Messages on the Mac that you have read something (`push_read=` in
@@ -69,7 +69,7 @@ screen reader. That shared bus remains enabled when Blip stops.
 
 | Path | Contains |
 |---|---|
-| `~/.blip/bin/` | the bridge tools (`imsg`, `imsg-send`, `imsg-read`, `contacts`, `contact-save`, `tcc-check`, `blip-check`, `blip-dispatch`) |
+| `~/.blip/bin/` | the bridge tools (`imsg`, `imsg-send`, `imsg-read`, `imsg-react`, `contacts`, `contact-save`, `tcc-check`, `blip-check`, `blip-dispatch`) |
 | `~/.blip/contact-save.lock` | empty serialization lock; no message or contact data |
 | `~/.blip/src/` | the installer's copy of the same files |
 | `~/Pictures/.blip-outbox/<id>/` | a file you are sending, for the seconds until Messages copies it into its own store; then moved to `~/.blip/sent` (leftovers older than an hour are swept) |
@@ -108,8 +108,10 @@ timestamp when `chat.db` changes; the client then fetches privately.
 
 ## What Blip cannot do
 
-Send tapbacks, edit or unsend, see typing indicators.
+Edit or unsend, see typing indicators.
 Those need Apple private APIs that Blip deliberately does not use.
+Tapbacks are the opt-in exception (`tapbacks=on`): they are Messages' own
+actions, performed through Accessibility, not a private API.
 
 The menubar panel saves only its preferred width and height in
 `$HOME/.local/state/blip/panel.json` (0600). No draft or conversation content

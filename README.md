@@ -348,8 +348,8 @@ and names `ffmpeg` and `mpv` as optional: voice messages need them)
 
 It writes `~/.config/blip/bridge.conf`, adds an ssh ControlMaster block
 (polling costs ~50 ms instead of a handshake), installs the bridge shim as
-`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/contacts`,
-`~/bin/contact-save` (set `bin_dir=~/.local/bin`
+`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/imsg-react`,
+`~/bin/contacts`, `~/bin/contact-save` (set `bin_dir=~/.local/bin`
 in `bridge.conf`, or `BLIP_BIN_DIR`, before running it to install them
 somewhere else — Blip reads the same key to find them), copies the Mac tools to
 `~/.blip/bin` on the Mac and runs `install.sh` there, generates a
@@ -509,6 +509,37 @@ iMessage. A never-iMessage RCS/SMS thread stays green. A failed iMessage to
 a phone still flips to SMS so the send does not stick. Groups are unchanged
 (they send by chat id). Default is off.
 
+**Tapbacks (experimental, Mac side only so far).** `imsg-react` adds or
+removes a classic tapback (❤️ 👍 👎 😂 ‼️ ❓) on one message by performing
+Messages' own tapback action through Accessibility, the grant `imsg-read`
+already holds. Those actions are named in the Mac's language and Apple may
+rename them, so it is off unless you turn it on:
+
+```
+# ~/.config/blip/bridge.conf
+tapbacks=on
+```
+
+```sh
+imsg-react --guid <message GUID> love          # dry run: says what it would do
+imsg-react --guid <message GUID> love --yes    # does it
+imsg-react --guid <message GUID> love --remove --yes
+```
+
+Success is the tapback row appearing in `chat.db`, never the screen. A bubble
+that does not offer the action is reported and left alone; there is no guess
+at a neighbouring action and no blind retry. It works on 1:1 conversations and
+text bubbles only (no groups, pictures, links or cards yet), with an
+English-language Mac. Messages comes to the front for a few seconds while it
+runs: anyone typing on the Mac just then types into that conversation, as with
+`push_read=thread`. It needs the read-push grants first: run
+`ssh your-mac 'python3 "$HOME/.blip/bin/blip-check" --markread'` once while
+someone sits at the Mac to click Allow (over ssh, so the grant is sshd's, not
+Terminal's); until then `imsg-react` refuses rather than raise a prompt nobody
+answers. Needs a
+`blip-setup` re-run: it installs `imsg-react` and the new `blip-dispatch` on
+the Mac and the `imsg-react` shim on Linux.
+
 **Two or more monitors:** one bar widget per screen is normal; only the one
 on the first screen polls and owns the app window, the others show the
 badge and forward clicks to it.
@@ -599,7 +630,7 @@ the checkout.)
 backing up anything it displaced as `<tool>.pre-blip.<epoch>`:
 
 ```bash
-rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts ~/bin/contact-save
+rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/imsg-react ~/bin/contacts ~/bin/contact-save
 ls ~/bin/*.pre-blip.* 2>/dev/null        # restore any of these you want back
 ```
 

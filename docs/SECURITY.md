@@ -63,6 +63,25 @@ back before success. The helper never writes Contacts databases directly and
 does not edit, merge, or delete existing cards. Contacts write permission is
 separate from Full Disk Access and may prompt on first save.
 
+## Optional tapbacks
+
+The confined key can invoke `imsg-react`, the first bridge tool that *acts*
+through Accessibility rather than reading: it performs one of Messages' own
+tapback actions on one bubble. It rides the Accessibility and Automation →
+System Events grants read push already needs, and changes nothing without
+`--yes`. It never asks for them itself: over ssh it reads the user `TCC.db`
+first and refuses (exit 77) unless Automation → System Events is already
+allowed for `sshd-keygen-wrapper`, because a prompt that pops at an empty Mac
+is recorded as a denial (#36). `blip-check --markread`, run over ssh while
+someone sits at the Mac, is where that prompt belongs. If a tapback of yours
+changes on some other message instead, the tool says so and names it
+("stray"); it never undoes it or retries on its own.
+The Linux shim refuses it unless `tapbacks=on` is in `bridge.conf`; that is an
+opt-in, not a boundary against someone who already holds the key. Message text
+reaches `osascript` on stdin, never argv. The target is named by GUID and
+resolved from `chat.db`; groups, attachments, links and cards are refused
+before Messages is touched, and success is read back from `chat.db`.
+
 ## Hardening by hand
 
 - **Pin the Blip key on a LAN.** `blip-setup` pins the key (`from=`) only when

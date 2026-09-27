@@ -1,0 +1,719 @@
+#!/usr/bin/env python3
+"""imsg-react — add or remove one classic tapback on one message.
+
+    imsg-react --guid <GUID> love             dry run: say what would happen
+    imsg-react --guid <GUID> love --yes       add ❤️ (nothing to do if it is there)
+    imsg-react --guid <GUID> love --remove --yes
+
+Tapbacks: love like dislike laugh emphasize question.
+
+The old note said sending a tapback needs SIP off. That was true of code
+injection; it is not true of Accessibility. Every rendered bubble in Messages'
+transcript exposes the tapbacks as AX custom actions ("Heart", "Thumbs up", ...)
+and performing one does what the tapback menu does — measured on macOS 26.6,
+SIP on, under the Accessibility grant imsg-read already holds. Going through
+Messages means the tapback syncs like one sent from the phone.
+
+How one run goes:
+  1. chat.db names the target: the message's text, its side, its minute, and
+     how many identical bubbles (same text, side and minute) sit below it;
+     Recently Deleted rows are not drawn, so they are not counted.
+     This account's tapback on the message is read from chat.db too, so an
+     add that is already there, or a remove that is not, exits 0 untouched.
+     The AX action toggles; deciding from chat.db is what keeps it from
+     undoing something.
+  2. Messages opens the conversation (imsg-read's address URL) and the bubble
+     is found among the rendered ones by that description, paging the
+     transcript up at most MAX_PAGES_UP pages. Nothing is performed while
+     searching.
+  3. The action is performed once, by its exact name, after the bubble is
+     scrolled into view and read again ("moved" if it is no longer the
+     same bubble; nothing is performed). A bubble that does not offer that
+     name is reported ("not-offered", with what it does offer) and left
+     alone: Apple is free to rename a localized action in a point release,
+     and the neighbouring action is never a substitute.
+  4. chat.db is the referee. Success means a new tapback row from this
+     account, of the requested type, appeared on the message within ROW_WAIT
+     seconds. The screen proves nothing. Paging for the bubble stops after
+     RUN_LIMIT seconds.
+
+The one retry, and when it gives up:
+  Messages sometimes keeps a stale copy of a bubble in the AX tree: same
+  frame, same label, same actions, dead. The action lands on it, nothing
+  happens, and no row follows (seven such runs on the first day of testing).
+  So: if no row came AND the bubble had a second copy at the SAME frame, and a
+  last look at chat.db still shows no row (a late one must not be toggled
+  back), the action is performed once on that second copy. Never on another
+  frame, never a second retry. No row after that → exit 75, "no-row". After
+  a retry the latest row is the verdict, a moment later: a first action that
+  landed late would be toggled back by the retry, and that must not read as
+  success.
+  A new row of this account on ANOTHER message in the conversation stops
+  the run at once, before any retry: exit 75, "stray", with that message's
+  GUID. The other person can see it, so it is named, never left as "no-row".
+  An osascript that times out or fails mid-run may have pressed anyway, so
+  chat.db is asked the same way: a row on the target is success, one
+  elsewhere a stray, none the error.
+
+Consent: over ssh, nothing touches System Events until TCC.db shows it is
+already allowed; a prompt at an empty Mac becomes a denial (#36). Exit 77.
+
+Refused before Messages is touched: groups (not tested yet), tapback rows,
+messages without text, attachments, links, and rich-link / app cards
+(their AX labels differ). Custom-emoji tapbacks are not here yet.
+
+Enabled from Linux by tapbacks=on in bridge.conf (the shim refuses otherwise).
+Message text never rides argv: it goes to osascript on stdin.
+
+Output: one JSON line on stdout; a reason on stderr when it fails.
+Exit: 0 done or nothing to do · 1 not-offered · 64 usage · 65 unsupported
+target · 69 Messages or chat.db unavailable · 70 a bug in this tool (the
+exception is named) · 75 unverified (not-rendered, ambiguous, moved, no-row,
+stray, unexpected row, timeout, osascript, busy) · 77 Accessibility or, over
+ssh, Automation → System Events not granted yet.
+"""
+import argparse
+import contextlib
+import datetime as dt
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+
+APPLE_EPOCH = 978307200
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# name -> (AX action name on an English-language Mac, tapback kind: 2000 + kind adds, 3000 + kind removes)
+TAPBACKS = {
+    "love": ("Heart", 0),
+    "like": ("Thumbs up", 1),
+    "dislike": ("Thumbs down", 2),
+    "laugh": ("Ha ha!", 3),
+    "emphasize": ("Exclamation mark", 4),
+    "question": ("Question mark", 5),
+}
+ACTIONS = [a for a, _ in TAPBACKS.values()]
+TAPBACKS_BY_KIND = {k: a for a, k in TAPBACKS.values()}
+
+MAX_PAGES_DOWN = 3   # a transcript parked above the newest message
+MAX_PAGES_UP = 6     # how far back a target may sit
+ROW_WAIT = 12.0      # seconds; a performed tapback lands in chat.db in 1-3 s (p90 of the wall time was 9 s)
+ROW_SETTLE = 3.0     # after a retry: time for a late first row to show before the verdict
+RUN_LIMIT = 60.0     # paging stops here (the longest run measured took 33 s); read push waits 150 s for the lock
+JXA_TIMEOUT = 45     # one scan or page; they take 1-3 s
+SELF_TWIN_NS = 3_000_000_000   # a self-thread echo is written within 3 s of its sent row
+
+EX_NOT_OFFERED, EX_USAGE, EX_UNSUPPORTED, EX_UNAVAILABLE, EX_SOFTWARE, EX_TEMPFAIL, EX_NOPERM = 1, 64, 65, 69, 70, 75, 77
+# osascript errors that may come after the action went through
+MAYBE_PERFORMED = {"timeout", "osascript", "perform-failed"}
+
+USER_TCC = os.path.expanduser("~/Library/Application Support/com.apple.TCC/TCC.db")
+SSH_CLIENT = "/usr/libexec/sshd-keygen-wrapper"   # the TCC client every ssh session runs as
+
+
+class Stop(Exception):
+    """End the run with one JSON result and an exit code."""
+
+    def __init__(self, code: str, exit_code: int, why: str = "", **extra):
+        super().__init__(why or code)
+        self.result = {"ok": False, "code": code, **extra}
+        self.exit_code = exit_code
+        self.why = why
+
+
+def sibling(name: str):
+    """A tool beside us, loaded as a module. imsg owns text decoding and
+    conversation clusters, imsg-read owns the Messages lock and conversation
+    selection, imsg-send owns self-handle detection: asked, not copied."""
+    loader = importlib.machinery.SourceFileLoader(f"blip_react_{name.replace('-', '_')}", os.path.join(HERE, name))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+# ------------------------------------------------------------------ chat.db
+
+def norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").replace("￼", "")).strip()
+
+
+def hhmm(apple_ns: int) -> str:
+    """The minute the transcript labels a bubble with, in the Mac's local time."""
+    return dt.datetime.fromtimestamp(apple_ns / 1e9 + APPLE_EPOCH).strftime("%H:%M")
+
+
+def strip_assoc(guid: str) -> str:
+    """'p:0/ABC' / 'bp:ABC' / 'ABC' → 'ABC' (same rule as imsg's enrich)."""
+    guid = guid or ""
+    if "/" in guid:
+        return guid.rsplit("/", 1)[1]
+    if ":" in guid:
+        return guid.split(":", 1)[1]
+    return guid
+
+
+MSG_COLS = """m.ROWID, m.guid, m.text, m.attributedBody, m.is_from_me, m.date, m.item_type,
+              m.associated_message_type, m.balloon_bundle_id, m.payload_data, m.cache_has_attachments"""
+
+# A link turns the bubble into a preview card whose label is the page's
+# title, not the text, even with no balloon_bundle_id on the row.
+LINK = re.compile(r"://|\bwww\.", re.I)
+
+# A bubble: a real message, not a tapback row. Same filter the transcript uses.
+BUBBLE = "m.item_type = 0 AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type >= 4000)"
+
+
+# Recently Deleted rows stay in chat.db; imsg's cluster lookup already needs this table.
+SHOWN = "m.ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join)"
+
+
+def bubbles(con, chats: list, where: str, order: str, params=()):
+    """The conversation's bubbles (all its chat rows) matching `where`.
+    Recently Deleted rows are left out: Messages does not draw them, and
+    counted as look-alikes they would move the aim to another bubble."""
+    return con.execute(
+        f"""SELECT {MSG_COLS} FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID
+             WHERE j.chat_id IN ({','.join('?' * len(chats))}) AND {BUBBLE} AND {SHOWN} AND {where}
+             ORDER BY {order}""", (*chats, *params))
+
+
+def resolve(con, imsg, guid: str, self_handles: list) -> dict:
+    """Everything the run needs to know about the target, from chat.db alone.
+    Raises Stop for a message this tool does not act on."""
+    row = con.execute(
+        f"""SELECT {MSG_COLS}, c.ROWID AS chat_rowid, c.chat_identifier, c.style
+              FROM message m
+              JOIN chat_message_join j ON j.message_id = m.ROWID
+              JOIN chat c ON c.ROWID = j.chat_id
+             WHERE m.guid = ?""", (guid,)).fetchone()
+    if not row:
+        raise Stop("no-such-message", EX_UNSUPPORTED, "no message with that GUID")
+    if row["style"] == 43:
+        raise Stop("unsupported", EX_UNSUPPORTED, "groups are not supported yet")
+    if row["item_type"] != 0 or (row["associated_message_type"] or 0) in range(2000, 4000):
+        raise Stop("unsupported", EX_UNSUPPORTED, "that row is not a message bubble")
+    if row["cache_has_attachments"] or row["balloon_bundle_id"]:
+        raise Stop("unsupported", EX_UNSUPPORTED, "attachments and link or app cards are not supported yet")
+    text = norm(imsg.message_text(row))
+    if not text:
+        raise Stop("unsupported", EX_UNSUPPORTED, "the message has no text")
+    if LINK.search(text):
+        raise Stop("unsupported", EX_UNSUPPORTED, "messages with a link are not supported yet")
+
+    ids = imsg.chat_cluster_ids(con, row["chat_identifier"])
+    chats = [r[0] for r in con.execute(
+        f"SELECT ROWID FROM chat WHERE chat_identifier IN ({','.join('?' * len(ids))})", ids)]
+
+    # Self-thread: every message is one sent row plus inbound echoes written
+    # within the same few seconds. The transcript draws one bubble, on the
+    # sent side, and a tapback may land on any of the rows. Aim at the sent
+    # row, accept a tapback row on any of them.
+    guids = [row["guid"]]
+    from_me = bool(row["is_from_me"])
+    date, rowid = row["date"], row["ROWID"]
+    self_thread = row["chat_identifier"] in self_handles
+    if self_thread:
+        twins = [t for t in bubbles(con, chats, "ABS(m.date - ?) < ?", "m.is_from_me DESC, m.date, m.ROWID",
+                                    (date, SELF_TWIN_NS)) if norm(imsg.message_text(t)) == text]
+        guids = list(dict.fromkeys([row["guid"]] + [t["guid"] for t in twins]))
+        sent = next((t for t in twins if t["is_from_me"]), None)
+        if sent:
+            from_me, date, rowid = True, sent["date"], sent["ROWID"]
+
+    # Bubbles below the target that look exactly like it (same side, minute
+    # and text). The transcript orders by (date, ROWID); self-thread echoes
+    # can share a nanosecond, so the tie-break matters.
+    minute = hhmm(date)
+    ordinal = 0
+    for r in bubbles(con, chats, "m.is_from_me = ? AND (m.date > ? OR (m.date = ? AND m.ROWID > ?))",
+                     "m.date, m.ROWID LIMIT 2000", (int(from_me), date, date, rowid)):
+        if hhmm(r["date"]) != minute:
+            break   # ordered by date: once past the minute, nothing later can match
+        if r["guid"] not in guids and norm(imsg.message_text(r)) == text:
+            ordinal += 1
+
+    # The bottom check compares the lowest rendered text bubble with the
+    # newest text message: pictures, cards and links have no text label to
+    # compare.
+    newest = None
+    for r in bubbles(con, chats, "NOT m.cache_has_attachments AND m.balloon_bundle_id IS NULL",
+                     "m.date DESC, m.ROWID DESC LIMIT 50"):
+        body = norm(imsg.message_text(r))
+        if body and not LINK.search(body):
+            newest = r
+            break
+    newest = newest or dict(row, date=date, is_from_me=from_me)
+    return {
+        "guids": guids, "chats": chats, "text": text, "from_me": from_me, "hhmm": minute, "ordinal": ordinal,
+        "chat": row["chat_identifier"], "self_thread": self_thread,
+        "newest": {"text": norm(imsg.message_text(newest)) or text, "from_me": bool(newest["is_from_me"]),
+                   "hhmm": hhmm(newest["date"])},
+    }
+
+
+def my_rows(con, guids: list, self_handles: list, since: int = 0) -> list:
+    """This account's tapback rows on the target, oldest first. "This
+    account" is is_from_me, or a self handle: in the self-thread Messages
+    writes the tapback as an inbound echo from your own address."""
+    handles = list(self_handles) or [""]
+    aimed = " OR ".join("m.associated_message_guid LIKE '%' || ?" for _ in guids)
+    return [dict(r) for r in con.execute(
+        f"""SELECT m.ROWID, m.associated_message_type AS type, m.associated_message_guid AS ag, m.date
+              FROM message m LEFT JOIN handle h ON h.ROWID = m.handle_id
+             WHERE m.associated_message_type BETWEEN 2000 AND 3999 AND m.date > ? AND ({aimed})
+               AND (m.is_from_me = 1 OR h.id IN ({','.join('?' * len(handles))}))
+             ORDER BY m.date, m.ROWID""", (since, *guids, *handles))
+        if strip_assoc(r["ag"]) in guids]
+
+
+def stray(con, target: dict, self_handles: list, since: int):
+    """No row on the target: stop if a tapback row of this account newer than
+    `since` sits on another message in the conversation. It is the one
+    failure the other person sees, so it is named ("stray", its GUID), never
+    left as "no-row", and never taken back or retried here. The row may add
+    or remove, or be one made on the phone meanwhile, so the reason says only
+    that one of yours changed."""
+    handles = list(self_handles) or [""]
+    for r in con.execute(
+            f"""SELECT m.associated_message_guid AS ag FROM message m
+                  JOIN chat_message_join j ON j.message_id = m.ROWID
+                  LEFT JOIN handle h ON h.ROWID = m.handle_id
+                 WHERE j.chat_id IN ({','.join('?' * len(target["chats"]))})
+                   AND m.associated_message_type BETWEEN 2000 AND 3999 AND m.date > ?
+                   AND (m.is_from_me = 1 OR h.id IN ({','.join('?' * len(handles))}))""",
+            (*target["chats"], since, *handles)):
+        if strip_assoc(r["ag"]) not in target["guids"]:
+            raise Stop("stray", EX_TEMPFAIL, "a tapback of yours changed on another message; check it in Messages",
+                       guid=strip_assoc(r["ag"]))
+
+
+def current_kind(rows: list):
+    """The tapback kind this account has on the message now, or None. The
+    latest row wins, as it does on the read path (imsg's enrich)."""
+    if not rows:
+        return None
+    t = rows[-1]["type"]
+    return t - 2000 if t < 3000 else None
+
+
+def plan(current, kind: int, remove: bool):
+    """The row type this run must produce, or None when there is nothing to do.
+    Adding a kind replaces any other: Messages keeps one tapback per person."""
+    if remove:
+        return 3000 + kind if current == kind else None
+    return None if current == kind else 2000 + kind
+
+
+def wait_for_row(con, guids, self_handles, since, seconds=None, pause=0.2):
+    """The first tapback row of this account on the target newer than
+    `since`, waiting up to `seconds` (ROW_WAIT by default)."""
+    end = time.monotonic() + (ROW_WAIT if seconds is None else seconds)
+    while True:
+        rows = my_rows(con, guids, self_handles, since)
+        if rows or time.monotonic() >= end:
+            return rows[0] if rows else None
+        time.sleep(pause)
+
+
+def apple_now() -> int:
+    return int((time.time() - APPLE_EPOCH) * 1e9)
+
+
+# ------------------------------------------------------------ Accessibility
+
+# One `entire contents` fetch, classified by the specifier string (no round
+# trip per element), one bulk read of the rows' labels, then attribute reads
+# only for the rows that matter: System Events costs ~70 ms per read. The
+# request (text included) arrives on stdin; argv carries none of it.
+JXA = r"""
+ObjC.import("Foundation");
+const se = Application("System Events");
+const proc = se.processes.byName("Messages");
+function safe(f, d) { try { const v = f(); return v === undefined ? d : v; } catch (e) { return d; } }
+function win() { return proc.windows[0]; }
+function norm(s) { return String(s || "").replace(/￼/g, "").replace(/\s+/g, " ").trim(); }
+function actionNames(el) { return (safe(() => el.actions.description(), []) || []).map(String); }
+function frame(el) {
+  const p = safe(() => el.position(), [0, 0]), s = safe(() => el.size(), [0, 0]);
+  return { x: p[0], y: p[1], w: s[0], h: s[1], key: [p[0], p[1], s[0], s[1]].join(",") };
+}
+// A bubble label reads "Sender, body, HH:MM"; once it carries tapbacks,
+// "2 reactions, You laughed at this, Ann loved this" sits before the time.
+// 12-hour clocks too.
+function parseLabel(d) {
+  const m = d.match(/^(.*), (\d{1,2})[:.](\d{2})(?:\s*([AP]M))?$/);
+  if (!m) return null;
+  let h = parseInt(m[2], 10);
+  if (m[4] === "PM" && h < 12) h += 12;
+  if (m[4] === "AM" && h === 12) h = 0;
+  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "")) };
+}
+// Exactly the text, or the text followed by the tapback annotation, which
+// opens with its count: "ok" must not match a neighbouring "ok, see you", nor
+// "ok, I loved this".
+function bodyIs(body, want) {
+  if (body === want) return true;
+  if (!body.startsWith(want + ", ")) return false;
+  return /^\d+ reactions?(, .+ this)*$/.test(body.slice(want.length + 2));
+}
+// The transcript is one group whose child groups are the message rows, each
+// labelled like its bubble; their labels come in bulk reads, since one AX
+// read per element costs ~70 ms. A row holds the live bubble somewhere below
+// it, at a depth that varies by kind; the row itself offers only scrolling
+// and the menu (see LIVE).
+function collect() {
+  const all = win().entireContents();
+  const paths = all.map(el => Automation.getDisplayString(el));
+  const at = {}, kids = {}, fields = [];
+  paths.forEach((s, i) => {
+    at[s] = i;
+    if (/ConversationList/.test(s)) return;
+    if (/\.textFields\.at\(\d+\)$/.test(s)) fields.push(all[i]);
+    const m = s.match(/^(.*)\.groups\.at\((\d+)\)$/);
+    if (m) (kids[m[1]] = kids[m[1]] || []).push(i);
+  });
+  // Parents by child count: once no parent left has more children than the
+  // best has labels, none can beat it. Usually one read.
+  let rows = [];
+  const parents = Object.keys(kids).filter(p => p in at).sort((a, b) => kids[b].length - kids[a].length);
+  for (const parent of parents) {
+    if (kids[parent].length <= rows.length) break;
+    const labels = safe(() => all[at[parent]].groups.description(), []) || [];
+    const found = [];
+    for (const i of kids[parent]) {
+      const k = parseInt(paths[i].match(/\.at\((\d+)\)$/)[1], 10);
+      const L = parseLabel(String(labels[k] || ""));
+      if (L) found.push({ el: all[i], path: paths[i], L });
+    }
+    if (found.length > rows.length) rows = found;
+  }
+  // copies(row): the elements under the row (and the row) carrying its label.
+  const copies = row => {
+    const out = [];
+    paths.forEach((s, i) => {
+      if (s !== row.path && !(s.startsWith(row.path + ".") && /\.(groups|uiElements)\.at\(\d+\)$/.test(s))) return;
+      const L = parseLabel(String(safe(() => all[i].description(), "") || ""));
+      if (L && L.time === row.L.time && L.body === row.L.body) out.push(all[i]);
+    });
+    return out;
+  };
+  return { rows, copies, fields };
+}
+// LIVE: a copy offering none of the six is not a live bubble (the row, or a
+// leftover rendering); it is neither a target nor counted among the
+// identical ones.
+function live(names, q) { return names.some(n => q.actions.indexOf(n) >= 0); }
+function liveCopies(els, q) {
+  return els.map(el => ({ el, names: actionNames(el) })).filter(c => live(c.names, q));
+}
+function scan(q) {
+  const { rows, copies, fields } = collect();
+  // The compose field spans the transcript: its centre splits sent from received.
+  let wide = null;
+  for (const f of fields) { const fr = frame(f); if (!wide || fr.w > wide.w) wide = fr; }
+  if (!wide) return { error: "no-conversation" };
+  const centre = wide.x + wide.w / 2;
+  const mine = fr => fr.x + fr.w / 2 > centre;
+  const res = { atBottom: false, frames: [], seen: rows.length, offered: [] };
+  let first = true;
+  for (let k = rows.length - 1; k >= 0; k--) {   // newest first: the common target is near the bottom
+    const row = rows[k];
+    const target = row.L.time === q.hhmm && bodyIs(row.L.body, q.text);
+    const newest = first && row.L.time === q.newest.hhmm && bodyIs(row.L.body, q.newest.text);
+    if (!first && !target) continue;
+    const all = copies(row), alive = liveCopies(all, q);
+    if (first && alive.length) {
+      // At the bottom when the newest live bubble is the newest text message,
+      // or when the transcript has no page left below it.
+      first = false;
+      res.atBottom = alive[0].names.indexOf("scroll down by a page") < 0 ||
+        (newest && mine(frame(alive[0].el)) === q.newest.from_me);
+    }
+    if (!target) continue;
+    if (!alive.length) {
+      // Only the target's own dead copies say what Messages offers instead.
+      for (const el of all) { const n = actionNames(el); if (n.length > res.offered.length) res.offered = n; }
+      continue;
+    }
+    for (const c of alive) {
+      const fr = frame(c.el);
+      if (mine(fr) !== q.from_me) continue;
+      let g = res.frames.find(x => x.key === fr.key);
+      if (!g) { g = { key: fr.key, copies: [] }; res.frames.push(g); }
+      g.copies.push(c);
+    }
+    if (res.frames.length > q.ordinal) break;
+  }
+  return res;
+}
+function run() {
+  const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  const q = JSON.parse(String(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding))));
+  if (q.mode === "page") {
+    // Live bubbles carry the transcript's page-scroll actions. No page below
+    // means already at the bottom.
+    const { rows, copies } = collect();
+    const down = q.direction === "down";
+    let c = null;
+    for (let n = 0; n < rows.length && !c; n++) c = liveCopies(copies(rows[down ? rows.length - 1 - n : n]), q)[0];
+    if (!c) return JSON.stringify({ ok: false, error: "no-bubbles" });
+    const i = c.names.indexOf(down ? "scroll down by a page" : "scroll up by a page");
+    if (i < 0) return JSON.stringify(down ? { ok: true, atBottom: true } : { ok: false, error: "no-page-action" });
+    try { c.el.actions()[i].perform(); return JSON.stringify({ ok: true }); }
+    catch (e) { return JSON.stringify({ ok: false, error: "page-failed" }); }
+  }
+  const r = scan(q);
+  if (r.error) return JSON.stringify({ ok: false, error: r.error });
+  const out = { ok: false, atBottom: r.atBottom, seen: r.seen };
+  const g = r.frames[q.ordinal];
+  if (!g) {
+    out.error = r.offered.length ? "not-offered" : "not-rendered";
+    if (r.offered.length) out.offered = r.offered;
+    return JSON.stringify(out);
+  }
+  out.frame = g.key; out.copies = g.copies.length;
+  // Identical bubbles below the target are counted from the bottom; with the
+  // bottom out of view one of them may be too, and the count would land on
+  // a neighbour.
+  if (q.ordinal > 0 && !r.atBottom) { out.error = "ambiguous"; return JSON.stringify(out); }
+  if (q.frame && q.frame !== g.key) { out.error = "moved"; return JSON.stringify(out); }
+  const c = g.copies[q.copy];
+  if (!c) { out.error = "no-second-copy"; return JSON.stringify(out); }
+  const i = c.names.indexOf(q.action);
+  if (i < 0) { out.error = "not-offered"; out.offered = c.names; return JSON.stringify(out); }
+  // Elements are addressed by their place in the tree, and scrolling can
+  // re-render the rows: read the label and the action again, and act only if
+  // the element is still this bubble.
+  safe(() => c.el.actions.byName("AXScrollToVisible").perform());
+  const L = parseLabel(String(safe(() => c.el.description(), "") || ""));
+  if (!L || L.time !== q.hhmm || !bodyIs(L.body, q.text) || actionNames(c.el)[i] !== q.action) {
+    out.error = "moved"; return JSON.stringify(out);
+  }
+  try { c.el.actions()[i].perform(); out.ok = true; } catch (e) { out.error = "perform-failed"; out.detail = String(e).slice(0, 200); }
+  return JSON.stringify(out);
+}
+"""
+
+
+def jxa(request: dict) -> dict:
+    """Run the AX script with one request on stdin; its JSON answer, or an error."""
+    try:
+        r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", JXA],
+                           input=json.dumps(request, ensure_ascii=False).encode(),
+                           capture_output=True, timeout=JXA_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout"}
+    if r.returncode != 0:
+        return {"ok": False, "error": "osascript", "detail": r.stderr.decode("utf-8", "replace").strip()[-200:]}
+    try:
+        answer = json.loads(r.stdout)
+    except ValueError:
+        return {"ok": False, "error": "osascript"}
+    return answer if isinstance(answer, dict) else {"ok": False, "error": "osascript"}
+
+
+def perform(target: dict, action: str, copy: int = 0, frame: str = "", run=jxa, deadline=None) -> dict:
+    """Find the bubble and perform `action` on it once. Pages the transcript
+    down to the newest message if it is parked above it, then up while the
+    target is not rendered, and only from the newest message. Paging is the
+    only thing repeated, and it stops at `deadline` (time.monotonic())."""
+    request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
+               "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS,
+               "action": action, "copy": copy, "frame": frame, "mode": "perform"}
+    down = up = 0
+    looked_again = bottom_seen = False
+    while True:
+        r = run(request)
+        if r.get("error") != "not-rendered":
+            return r
+        if deadline is not None and time.monotonic() >= deadline:
+            return dict(r, detail=f"still not found after {RUN_LIMIT:.0f} s")
+        bottom_seen = bottom_seen or bool(r.get("atBottom"))
+        if not bottom_seen and down < MAX_PAGES_DOWN:
+            direction = "down"
+            down += 1
+        elif not looked_again:
+            looked_again = True   # a conversation just opened can still be drawing
+            time.sleep(0.8)
+            continue
+        elif bottom_seen and up < MAX_PAGES_UP:
+            # Paging up only from the newest message: the first match met on
+            # the way up is then the newest of its look-alikes.
+            direction = "up"
+            up += 1
+        else:
+            return r
+        paged = run({**request, "mode": "page", "direction": direction})
+        if not paged.get("ok"):
+            return {"ok": False, "error": "not-rendered", "detail": paged.get("error")}
+        if paged.get("atBottom"):
+            bottom_seen = True   # nothing below: look again rather than page
+            continue
+        time.sleep(0.6)
+
+
+# ------------------------------------------------------------------ consent
+
+def system_events_consent(path: str = USER_TCC) -> str:
+    """"" when this run cannot raise a consent prompt nobody will answer,
+    else why not. Over ssh, the first System Events call from
+    sshd-keygen-wrapper is an Automation prompt on the Mac's screen, while
+    the person who asked sits at the Linux box. Unanswered, it is recorded as
+    a denial that Settings may refuse to undo (#36). So over ssh this tool
+    acts only once TCC.db records the grant (blip-check --markread asks for
+    it: over ssh, so the grant is sshd's, not Terminal's, with someone at the
+    Mac to click). The same client's Full Disk Access makes the user TCC.db
+    readable; if it cannot be read, or reads differently, the answer is no.
+    Run at the Mac itself there is someone to click, and nothing is checked."""
+    if not os.environ.get("SSH_CONNECTION"):
+        return ""
+    try:
+        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as con:
+            row = con.execute(
+                """SELECT auth_value FROM access WHERE service = 'kTCCServiceAppleEvents'
+                     AND client = ? AND indirect_object_identifier = 'com.apple.systemevents'""",
+                (SSH_CLIENT,)).fetchone()
+    except sqlite3.Error:
+        return ("cannot confirm the Automation grant for System Events (TCC.db unreadable), so nothing was "
+                "done; run blip-check --markread over ssh while someone at the Mac clicks Allow")
+    if row is None:
+        return ("System Events has not been allowed for ssh on this Mac yet, and its prompt would go "
+                "unanswered; run blip-check --markread over ssh while someone at the Mac clicks Allow")
+    if row[0] != 2:
+        return ("Automation for System Events is denied for sshd-keygen-wrapper; on the Mac run "
+                "`tccutil reset AppleEvents`, then run blip-check --markread over ssh while someone at the "
+                "Mac clicks Allow")
+    return ""
+
+
+# --------------------------------------------------------------------- run
+
+def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa) -> dict:
+    """Steps 3-4 and the one retry (see the module docstring). `ui` is the
+    imsg-read module (lock, selection, focus); tests pass a stand-in."""
+    action = TAPBACKS_BY_KIND[kind]
+    expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, remove)
+    if expected is None:
+        return {"ok": True, "result": "unchanged"}
+    why = system_events_consent()   # before ensure_messages: it is already a System Events call
+    if why:
+        raise Stop("consent", EX_NOPERM, why)
+    why = ui.ensure_messages()
+    if why:
+        raise Stop("unavailable", EX_UNAVAILABLE, why)
+    why = ui.accessibility()
+    if why:
+        raise Stop("accessibility", EX_NOPERM, why)
+    started = time.monotonic()
+    deadline = started + RUN_LIMIT
+    prev = ui.frontmost()
+    try:
+        why = ui.select_chat(target["chat"])
+        if why:
+            raise Stop("unavailable", EX_UNAVAILABLE, why)
+        since = apple_now()
+        r = perform(target, action, run=run, deadline=deadline)
+        row = landed(con, r, action, target, self_handles, since)
+        if row is None and r.get("copies", 1) > 1:
+            row = wait_for_row(con, target["guids"], self_handles, since, seconds=0)   # the last look
+            if row is None:
+                r = perform(target, action, copy=1, frame=r["frame"], run=run, deadline=deadline)
+                row = landed(con, r, action, target, self_handles, since)
+                if row is not None:
+                    time.sleep(ROW_SETTLE)
+                    row = my_rows(con, target["guids"], self_handles, since)[-1]
+        if row is None:
+            raise Stop("no-row", EX_TEMPFAIL, f"'{action}' was performed but no tapback row reached chat.db")
+        if row["type"] != expected:
+            raise Stop("unexpected", EX_TEMPFAIL, f"chat.db shows tapback type {row['type']}, not {expected}",
+                       type=row["type"])
+    finally:
+        ui.restore_front(prev)
+    return {"ok": True, "result": "removed" if expected >= 3000 else "added", "type": expected,
+            "seconds": round(time.monotonic() - started, 1)}
+
+
+def landed(con, r: dict, action: str, target: dict, self_handles: list, since: int):
+    """chat.db's answer to one perform: this account's first row on the
+    target, or None. An answer that pressed nothing is raised at once; one
+    that may have pressed (MAYBE_PERFORMED) waits for chat.db like a press,
+    so a row on the target is success and one elsewhere a stray."""
+    if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
+        raise failure(r, action)
+    row = wait_for_row(con, target["guids"], self_handles, since)
+    if row is None:
+        stray(con, target, self_handles, since)
+        if not r.get("ok"):
+            raise failure(r, action)
+    return row
+
+
+def failure(r: dict, action: str) -> Stop:
+    error = r.get("error") or "failed"
+    if error == "not-offered":
+        return Stop("not-offered", EX_NOT_OFFERED,
+                    f"the bubble does not offer '{action}' (Messages may have renamed it); nothing was done",
+                    action=action, offered=r.get("offered", [])[:20])
+    if error == "no-conversation":
+        return Stop("unavailable", EX_UNAVAILABLE, "Messages shows no conversation")
+    return Stop(error, EX_TEMPFAIL, f"{error}{': ' + r['detail'] if r.get('detail') else ''}")
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="imsg-react", add_help=True,
+                                description="Add or remove one tapback. Dry run unless --yes.")
+    p.add_argument("tapback", choices=sorted(TAPBACKS))
+    p.add_argument("--guid", required=True, help="the message's GUID (message.guid)")
+    p.add_argument("--remove", action="store_true", help="remove this tapback instead of adding it")
+    p.add_argument("--yes", action="store_true", help="act; without it nothing on the Mac changes")
+    try:
+        a = p.parse_args(argv)
+    except SystemExit as e:
+        return EX_USAGE if e.code else 0
+    if not re.fullmatch(r"[A-Za-z0-9:/_-]{1,128}", a.guid):
+        return emit(Stop("usage", EX_USAGE, "that is not a message GUID"))
+    try:
+        imsg = sibling("imsg")
+        try:
+            self_handles = sibling("imsg-send").detect_self_handles()
+        except Exception:
+            self_handles = []
+        con = sqlite3.connect(f"file:{imsg.DB_PATH}?mode=ro", uri=True, timeout=5)
+        con.row_factory = sqlite3.Row
+        target = resolve(con, imsg, a.guid, self_handles)
+        action, kind = TAPBACKS[a.tapback]
+        if not a.yes:
+            expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, a.remove)
+            would = "unchanged" if expected is None else ("remove" if expected >= 3000 else "add")
+            return emit({"ok": True, "result": "dry-run", "would": would, "action": action})
+        ui = sibling("imsg-read")
+        with ui.messages_ui_lock():
+            return emit(react(con, target, kind, a.remove, self_handles, ui))
+    except Stop as stop:
+        return emit(stop)
+    except TimeoutError as exc:   # the Messages lock; before OSError, which it is
+        return emit(Stop("busy", EX_TEMPFAIL, str(exc)))
+    except (sqlite3.Error, OSError) as exc:
+        return emit(Stop("unavailable", EX_UNAVAILABLE, str(exc)))
+    except Exception as exc:   # never exit 1 by accident: that is "not-offered"
+        return emit(Stop("error", EX_SOFTWARE, f"{type(exc).__name__}: {exc}"))
+
+
+def emit(result) -> int:
+    if isinstance(result, Stop):
+        if result.why:
+            sys.stderr.write(f"imsg-react: {result.why}\n")
+        print(json.dumps(result.result, ensure_ascii=False))
+        return result.exit_code
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
