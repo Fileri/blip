@@ -167,6 +167,10 @@ export function pendingAfterLoad(
   return Object.assign({}, p, { tries: p.tries + 1 });
 }
 
+/** The status line when imsg-react could not be started at all: the shim is
+ *  missing from binDir, which blip-setup installs. */
+export const TAPBACK_NOT_STARTED = "tapback: imsg-react did not start; re-run blip-setup";
+
 /** One status line for a run that did not end in the tapback asked for.
  *  imsg-react says why on stderr ("imsg-react: …"), and each reason says
  *  itself what happened: nothing done, done but unconfirmed, or landed on

@@ -37,16 +37,21 @@ Menu {
     menu.tapbackRequested(kind)
     menu.close()
   }
-  // the row takes the keys first, so 1–6 work however the menu was opened
+  // The row has the keys when the menu opens, whether by click or Ctrl+E, and
+  // is the menu's first item: Down leaves it, Up from "Quote and reply" comes
+  // back. Menu gives focus only to a MenuItem it moves to, so the row takes it.
   onOpened: {
     tapbackStrip.cursor = TapbackActions.initialTapbackCursor(menu.myTapback, menu.keyHints)
-    if (menu.tapbacksShown) tapbackStrip.forceActiveFocus()
+    if (menu.tapbacksShown) menu.currentIndex = 0
   }
+  onCurrentIndexChanged: if (menu.currentIndex === 0 && menu.tapbacksShown) tapbackStrip.forceActiveFocus()
 
   Item {
     id: tapbackStrip
     visible: menu.tapbacksShown
     focus: menu.tapbacksShown
+    // what Menu's Up/Down look for; without it Up stops at the first MenuItem
+    activeFocusOnTab: menu.tapbacksShown
     /** The marked tapback, for Left/Right and Enter; -1 for none. */
     property int cursor: -1
     // Up/Down, Esc, and Enter with nothing marked are left unaccepted: they stay the menu's

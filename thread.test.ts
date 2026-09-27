@@ -752,6 +752,17 @@ describe("tapback targets", () => {
     expect(out[0]!.tapbacks).toEqual([{ emoji: "❤️", from_me: true, by: null }]);
   });
 
+  test("one same-second twin in a 1:1 is a coincidence, not a self-thread", () => {
+    // both sides typing "ok" in the same second must not make their tapback yours
+    const them = [{ emoji: "👍", from_me: false, by: "Test Person" }];
+    const out = selectThread(
+      [msg({ from_me: true, text: "ok" }), msg({ text: "ok", tapbacks: them })],
+      "+15551234567", false, 80, [],
+    );
+    // (the thread view may still fold the pair into one row; the tapback stays theirs)
+    expect(out.flatMap((m) => m.tapbacks ?? [])).toEqual(them);
+  });
+
   test("anywhere else a tapback stays whoever's it was", () => {
     const them = [{ emoji: "👍", from_me: false, by: "Test Person" }];
     const out = selectThread([msg({ tapbacks: them })], "+15551234567", false, 80, []);

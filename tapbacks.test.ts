@@ -139,7 +139,12 @@ describe("message menu: tapbacks", () => {
     expect(keys.indexOf("root.openMessageMenuAt(b")).toBeLessThan(keys.indexOf("root.send()"));
     expect(view).toContain("messageMenu.keyHints = true");
     expect(view).toContain("if (keyHints) composeField.forceActiveFocus()");
-    expect(menu).toContain("    if (menu.tapbacksShown) tapbackStrip.forceActiveFocus()");
+    // the row has the keys on open, and Menu's Up/Down reach it: Qt skips an
+    // item without activeFocusOnTab and gives focus only to a MenuItem
+    expect(menu).toContain("    if (menu.tapbacksShown) menu.currentIndex = 0");
+    expect(menu).toContain("onCurrentIndexChanged: if (menu.currentIndex === 0 && menu.tapbacksShown) tapbackStrip.forceActiveFocus()");
+    expect(menu).toContain("    activeFocusOnTab: menu.tapbacksShown");
+    expect(menu.indexOf("id: tapbackStrip")).toBeLessThan(menu.indexOf("MenuItem {"));
     expect(menu).toContain("var kind = marked ? TapbackActions.TAPBACKS[tapbackStrip.cursor].kind : TapbackActions.tapbackForKey(event.text)");
     // the number keys go through the same signal and busy gate as a click
     const strip = menu.slice(menu.indexOf("Keys.onPressed"), menu.indexOf("Row {"));
@@ -169,8 +174,18 @@ describe("message menu: tapbacks", () => {
     expect(exited).toContain("root.requestThreadLoad(reactProc.chat)");
     expect(exited.indexOf("{ done: true })")).toBeLessThan(exited.indexOf("root.requestThreadLoad(reactProc.chat)"));
     const failed = exited.slice(exited.indexOf("} else {"));
-    expect(failed).toContain("root.pendingTapback = null");
-    expect(failed).toContain("root.note = TapbackActions.tapbackFailure(code, reactProc.lastErr)");
+    expect(failed).toContain("root.tapbackFailed(reactProc.chat, TapbackActions.tapbackFailure(code, reactProc.lastErr))");
+    // a tool that never started emits no exited: caught the way BarWidget's collector is
+    expect(exited).toContain("reactProc.sawExit = true");
+    expect(exited).toContain("if (!reactProc.sawExit && !reactProc.running) root.tapbackFailed(reactProc.chat, TapbackActions.TAPBACK_NOT_STARTED)");
+    // a failure clears the pill, and is said in its own conversation, now or when it is opened again
+    const failedFn = view.slice(view.indexOf("function tapbackFailed"), view.indexOf("readonly property bool tapbacksBusy"));
+    expect(failedFn).toContain("root.pendingTapback = null");
+    expect(failedFn).toContain("if (root.active && String(root.active.chat) === chat) root.note = text");
+    expect(failedFn).toContain("else root.tapbackNote = { chat: chat, text: text }");
+    const show = view.slice(view.indexOf("function showThread"), view.indexOf("clearAttachments()", view.indexOf("function showThread")));
+    expect(show.indexOf('note = ""')).toBeLessThan(show.indexOf("note = root.tapbackNote.text"));
+    expect(view).toContain("root.tapbackNote = null\n    reactProc.running = true");
     expect(exited).not.toContain("reactProc.running = true");
     // the dimmed pill is the only "on its way"; the status line speaks only for a failure
     expect(view).not.toContain('"tapback…"');
@@ -178,6 +193,9 @@ describe("message menu: tapbacks", () => {
     // every load settles against what it read, knowing whether it started after the tool's exit
     expect(view).toContain("root.threadTapbackDone = !!(root.pendingTapback && root.pendingTapback.done)");
     expect(view).toContain("root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, list, root.threadTapbackDone)");
+    // a failed load settles too (as not showing the bubble), or the menu stays busy
+    const loader = view.slice(view.indexOf("id: threadProc"), view.indexOf("id: sendProc"));
+    expect(loader.split("TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, [], root.threadTapbackDone)").length).toBe(3);
     expect(view).toContain("if (root.threadTapbackDone && root.pendingTapback && root.pendingTapback.chat === root.threadRunningChat) {");
     // the text bubble's pill and the room left for it both draw through shownTapbacks
     expect(view).toContain("readonly property var shownTapbacks: TapbackActions.shownTapbacks(modelData, root.pendingTapback)");

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  canTapback, initialTapbackCursor, moveTapbackCursor, myTapback, tapbackForKey, pendingAfterLoad, SETTLE_TRIES, pendingTapback, shownTapbacks, TAPBACKS, tapbackArgs, tapbackFailure, tapbackKind,
+  canTapback, initialTapbackCursor, moveTapbackCursor, myTapback, tapbackForKey, pendingAfterLoad, SETTLE_TRIES, pendingTapback, shownTapbacks, TAPBACKS, tapbackArgs, tapbackFailure, tapbackKind, TAPBACK_NOT_STARTED,
   tapbackSettled, tapbacksOn,
 } from "./tapback-actions";
 
@@ -57,6 +57,8 @@ test("a failure is one line: the tool's own reason, or why the Mac did not answe
   // a stray did send, on another message: the prefix must not say otherwise
   expect(tapbackFailure(75, "imsg-react: a tapback of yours changed on another message; check it in Messages\n"))
     .toBe("tapback: a tapback of yours changed on another message; check it in Messages");
+  // the tool never started: same prefix, so the next tapback clears it too
+  expect(TAPBACK_NOT_STARTED.indexOf("tapback: ")).toBe(0);
 });
 
 test("tapbacks= is off unless it says on/yes/true/1", () => {
@@ -77,6 +79,7 @@ test("the deployed QML module agrees with tapback-actions.ts", async () => {
   expect(runtime.tapbackArgs("G", "love", "love")).toEqual(tapbackArgs("G", "love", "love"));
   expect(runtime.myTapback({ tapbacks: [{ emoji: "❤", from_me: true }] })).toBe("love");
   expect(runtime.tapbackFailure(1, "imsg-react: x")).toBe(tapbackFailure(1, "imsg-react: x"));
+  expect(runtime.TAPBACK_NOT_STARTED).toBe(TAPBACK_NOT_STARTED);
 });
 
 describe("a tapback on its way", () => {

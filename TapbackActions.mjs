@@ -94,6 +94,7 @@ function pendingAfterLoad(p, chat, bubbles, startedAfterDone) {
     return null;
   return Object.assign({}, p, { tries: p.tries + 1 });
 }
+var TAPBACK_NOT_STARTED = "tapback: imsg-react did not start; re-run blip-setup";
 function tapbackFailure(code, stderr) {
   if (code === 69 || code === 255)
     return "tapback: Mac unreachable";
@@ -105,6 +106,7 @@ function tapbackFailure(code, stderr) {
 export {
   SETTLE_TRIES,
   TAPBACKS,
+  TAPBACK_NOT_STARTED,
   canTapback,
   initialTapbackCursor,
   moveTapbackCursor,

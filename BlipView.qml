@@ -611,6 +611,8 @@ FocusScope {
     firstLoad = true
     pushPending = false
     note = ""
+    // a tapback that failed while you were elsewhere is said where it was sent
+    if (root.tapbackNote && root.tapbackNote.chat === String(t.chat)) { note = root.tapbackNote.text; root.tapbackNote = null }
     loading = true
     composeField.text = drafts[String(t.chat)] || ""   // this conversation's unsent text
     composeField.cursorPosition = composeField.length
@@ -1810,11 +1812,14 @@ FocusScope {
             // and only through what loaded, never the sidebar's newer ts.
             root.markRead(root.threadRunningChat, seen)
           } else {
+            // a failed load settles a confirmed tapback too, or the menu stays busy
+            root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, [], root.threadTapbackDone)
             root.bubbles = []
             root.rendered = false
             root.note = String(d.error || "could not load this thread")
           }
         } catch (e) {
+          root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, [], root.threadTapbackDone)
           root.bubbles = []
           root.rendered = false
           root.note = "could not load this thread"
@@ -1872,8 +1877,18 @@ FocusScope {
     id: reactProc
     property string chat: ""  // the conversation this run's tapback is in
     property string lastErr: ""
+    // A Process that fails to start emits no exited (see BarWidget's collector):
+    // without this the pill would stay dimmed and the menu busy for good.
+    property bool sawExit: false
+    onRunningChanged: {
+      if (running) { sawExit = false; return }
+      Qt.callLater(function() {
+        if (!reactProc.sawExit && !reactProc.running) root.tapbackFailed(reactProc.chat, TapbackActions.TAPBACK_NOT_STARTED)
+      })
+    }
     stderr: StdioCollector { onStreamFinished: reactProc.lastErr = text }
     onExited: function(code, status) {
+      reactProc.sawExit = true
       if (code === 0) {
         // the thread was left while it ran: nothing on screen is waiting for it
         if (!root.inThread || String(root.active.chat) !== reactProc.chat) root.pendingTapback = null
@@ -1883,8 +1898,7 @@ FocusScope {
           root.requestThreadLoad(reactProc.chat)
         }
       } else {
-        root.pendingTapback = null
-        root.note = TapbackActions.tapbackFailure(code, reactProc.lastErr)
+        root.tapbackFailed(reactProc.chat, TapbackActions.tapbackFailure(code, reactProc.lastErr))
       }
     }
   }
@@ -4097,6 +4111,13 @@ FocusScope {
   // One at a time: the menu's row is busy until then.
   readonly property bool tapbacksOn: hostWidget ? hostWidget.tapbacks === true : false
   property var pendingTapback: null
+  /** A failure in a conversation you had left: { chat, text }, shown when it is opened again. */
+  property var tapbackNote: null
+  function tapbackFailed(chat, text) {
+    root.pendingTapback = null
+    if (root.active && String(root.active.chat) === chat) root.note = text
+    else root.tapbackNote = { chat: chat, text: text }
+  }
   readonly property bool tapbacksBusy: reactProc.running || pendingTapback !== null
   function sendTapback(message, kind) {
     if (root.tapbacksBusy || !root.tapbacksOn || !TapbackActions.canTapback(message, root.activeIsGroup)) return
@@ -4108,6 +4129,7 @@ FocusScope {
       .concat(TapbackActions.tapbackArgs(String(message.guid), kind, current))
     // the dimmed pill says it is on its way; an earlier failure is old news
     if (root.note.indexOf("tapback: ") === 0) root.note = ""
+    root.tapbackNote = null
     reactProc.running = true
   }
   MessageMenu {
