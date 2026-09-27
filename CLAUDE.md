@@ -259,8 +259,8 @@ what it is handed. Keep it that way.
   "Mom" cards outvote your own "Monica Gamble" for the same number.
 - **Contact review is read-only and separate from configuration.**
   `ContactReview.qml` opens from a conversation and renders models supplied by
-  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, and exact-card details
-  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, and exact-card vCard export
+  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, exact-card details,
+  and exact-card vCard export
   cross the Mac protocol. Handles and opaque tokens travel on bounded stdin;
   no display-name choices or appearance preferences are saved. A group offers
   its participants, never the last speaker as a stand-in for the group.
