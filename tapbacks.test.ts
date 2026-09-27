@@ -174,7 +174,7 @@ describe("message menu: tapbacks", () => {
     expect(exited).not.toContain("reactProc.running = true");
     // the dimmed pill is the only "on its way"; the status line speaks only for a failure
     expect(view).not.toContain('"tapback…"');
-    expect(view).toContain('if (root.note.indexOf("tapback not sent") === 0) root.note = ""');
+    expect(view).toContain('if (root.note.indexOf("tapback: ") === 0) root.note = ""');
     // every load settles against what it read, knowing whether it started after the tool's exit
     expect(view).toContain("root.threadTapbackDone = !!(root.pendingTapback && root.pendingTapback.done)");
     expect(view).toContain("root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, list, root.threadTapbackDone)");

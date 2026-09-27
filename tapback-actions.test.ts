@@ -49,11 +49,14 @@ test("choosing the tapback you have removes it; any other adds (and replaces)", 
 });
 
 test("a failure is one line: the tool's own reason, or why the Mac did not answer", () => {
-  expect(tapbackFailure(69, "")).toBe("tapback not sent — Mac unreachable");
-  expect(tapbackFailure(255, "ssh: connect")).toBe("tapback not sent — Mac unreachable");
+  expect(tapbackFailure(69, "")).toBe("tapback: Mac unreachable");
+  expect(tapbackFailure(255, "ssh: connect")).toBe("tapback: Mac unreachable");
   expect(tapbackFailure(1, "{…}\nimsg-react: the bubble does not offer 'Heart'; nothing was done\n"))
-    .toBe("tapback not sent — the bubble does not offer 'Heart'; nothing was done");
-  expect(tapbackFailure(75, "")).toBe("tapback not sent — imsg-react exit 75");
+    .toBe("tapback: the bubble does not offer 'Heart'; nothing was done");
+  expect(tapbackFailure(75, "")).toBe("tapback: imsg-react exit 75");
+  // a stray did send, on another message: the prefix must not say otherwise
+  expect(tapbackFailure(75, "imsg-react: a tapback of yours changed on another message; check it in Messages\n"))
+    .toBe("tapback: a tapback of yours changed on another message; check it in Messages");
 });
 
 test("tapbacks= is off unless it says on/yes/true/1", () => {

@@ -4107,7 +4107,7 @@ FocusScope {
     reactProc.command = SourceId.bridgeArgv(reactProc.chat, "imsg-react", hostWidget ? hostWidget.binDir : root.home + "/bin")
       .concat(TapbackActions.tapbackArgs(String(message.guid), kind, current))
     // the dimmed pill says it is on its way; an earlier failure is old news
-    if (root.note.indexOf("tapback not sent") === 0) root.note = ""
+    if (root.note.indexOf("tapback: ") === 0) root.note = ""
     reactProc.running = true
   }
   MessageMenu {

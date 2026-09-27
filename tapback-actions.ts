@@ -167,11 +167,14 @@ export function pendingAfterLoad(
   return Object.assign({}, p, { tries: p.tries + 1 });
 }
 
-/** One status line for a run that did not end in a tapback. imsg-react says
- *  why on stderr ("imsg-react: …"); the shim says so for tapbacks=off. */
+/** One status line for a run that did not end in the tapback asked for.
+ *  imsg-react says why on stderr ("imsg-react: …"), and each reason says
+ *  itself what happened: nothing done, done but unconfirmed, or landed on
+ *  another message ("stray"). So the prefix claims nothing. The shim says
+ *  so for tapbacks=off. */
 export function tapbackFailure(code: number, stderr: string): string {
-  if (code === 69 || code === 255) return "tapback not sent — Mac unreachable";
+  if (code === 69 || code === 255) return "tapback: Mac unreachable";
   const line = String(stderr || "").split("\n").map((l) => l.trim()).filter((l) => l !== "").pop() || "";
   const why = line.replace(/^imsg-react:\s*/, "").slice(0, 200);
-  return "tapback not sent — " + (why || "imsg-react exit " + code);
+  return "tapback: " + (why || "imsg-react exit " + code);
 }

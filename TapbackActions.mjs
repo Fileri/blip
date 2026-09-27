@@ -96,11 +96,11 @@ function pendingAfterLoad(p, chat, bubbles, startedAfterDone) {
 }
 function tapbackFailure(code, stderr) {
   if (code === 69 || code === 255)
-    return "tapback not sent — Mac unreachable";
+    return "tapback: Mac unreachable";
   const line = String(stderr || "").split(`
 `).map((l) => l.trim()).filter((l) => l !== "").pop() || "";
   const why = line.replace(/^imsg-react:\s*/, "").slice(0, 200);
-  return "tapback not sent — " + (why || "imsg-react exit " + code);
+  return "tapback: " + (why || "imsg-react exit " + code);
 }
 export {
   SETTLE_TRIES,
