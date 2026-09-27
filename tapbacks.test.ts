@@ -159,6 +159,17 @@ describe("message menu: tapbacks", () => {
     expect(menu).toContain("readonly property bool marked: tapbackStrip.activeFocus && tapbackStrip.cursor === index");
   });
 
+  test("an open menu survives a reload and follows its message (Ctrl+E while a tapback lands)", () => {
+    // parented to the bubble's row, the menu closed when the Repeater rebuilt it
+    const at = view.slice(view.indexOf("function openMessageMenuAt"), view.indexOf("readonly property bool tapbacksOn"));
+    expect(at).toContain("messageMenu.popup(root, at.x, at.y)");
+    expect(at).not.toContain("messageMenu.popup(item");
+    const changed = view.slice(view.indexOf("onBubblesChanged: {"), view.indexOf("property bool pinToBottom"));
+    expect(changed).toContain("var m = MessageActions.bubbleIndexByGuid(bubbles, menuGuid)");
+    expect(changed).toContain("if (m >= 0) messageContext = bubbles[m]");
+    expect(changed).toContain("else messageMenu.close()");
+  });
+
   test("the selected bubble stays selected when its tapback lands (a reload)", () => {
     expect(view).toContain("var keep = bubbleCursorGuid");
     expect(view).toContain("if (keep !== \"\") Qt.callLater(root.restoreBubbleCursor, keep)");

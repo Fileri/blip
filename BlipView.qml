@@ -399,6 +399,14 @@ FocusScope {
   onBubblesChanged: {
     var keep = bubbleCursorGuid
     clearBubbleCursor()
+    // an open menu follows its message into the new rows (a landed tapback
+    // changes which one is yours), or closes when the message is gone
+    var menuGuid = messageMenu.opened && messageContext ? String(messageContext.guid || "") : ""
+    if (menuGuid !== "") {
+      var m = MessageActions.bubbleIndexByGuid(bubbles, menuGuid)
+      if (m >= 0) messageContext = bubbles[m]
+      else messageMenu.close()
+    }
     // after the Repeater has its new rows, so the row's hasCursor change registers it
     if (keep !== "") Qt.callLater(root.restoreBubbleCursor, keep)
   }
@@ -4100,8 +4108,12 @@ FocusScope {
     messageContext = message
     messageMenu.linkUrl = ""
     messageMenu.keyHints = true
-    if (item) messageMenu.popup(item, Math.max(0, (item.width - messageMenu.implicitWidth) / 2), item.height)
-    else messageMenu.popup()
+    // placed under the bubble but parented to the view: a reload rebuilds the
+    // bubble's row, and a menu parented to it would close with it
+    if (item) {
+      var at = item.mapToItem(root, Math.max(0, (item.width - messageMenu.implicitWidth) / 2), item.height)
+      messageMenu.popup(root, at.x, at.y)
+    } else messageMenu.popup()
   }
 
   // ---- outgoing tapbacks: tapbacks=on in bridge.conf, the Mac's imsg-react
