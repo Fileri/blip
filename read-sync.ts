@@ -69,12 +69,12 @@ export function reconcileReadIntents(pending: ReadIntents, snapshot: ReadSnapsho
   return next;
 }
 
-/** Coalescing cannot cross an explicit gesture: a read queued after
- * mark-all must stay after it instead of merging into an earlier read. */
-export function enqueueRefresh<T extends { markRead: boolean;
-  readChat: string; seen: string; deep: boolean }>(queue: T[], req: T): T[] {
+/** Coalescing cannot cross an explicit gesture: read → unread → read must
+ * keep that order instead of moving the last read ahead of mark-unread. */
+export function enqueueRefresh<T extends { markRead: boolean; unreadChat: string;
+  act: string; readChat: string; seen: string; deep: boolean }>(queue: T[], req: T): T[] {
   const q = queue.slice();
-  const barrier = (r: T) => r.markRead;
+  const barrier = (r: T) => r.markRead || r.unreadChat || r.act;
   if (!barrier(req)) {
     for (let i = q.length - 1; i >= 0; i--) {
       if (barrier(q[i]!)) break;

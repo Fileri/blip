@@ -289,6 +289,17 @@ describe("QML safety invariants", () => {
     expect(nav).toContain("Qt.ShiftModifier");
   });
 
+  test("mark as unread is a list action, not a compose jump that eats the letter u", () => {
+    expect(panel).toContain('text: "Review contact"');
+    expect(panel).toContain('text: "Mark as Unread"');
+    expect(qmlFunction("markUnread")).toContain("hostWidget.markThreadUnread");
+    expect(widget).toContain("function markThreadUnread");
+    expect(widget).toContain('--mark-unread');
+    const fn = handleTextKeySource();
+    expect(fn).toContain('text === "u"');
+    expect(fn.indexOf('text === "u"')).toBeLessThan(fn.indexOf("inThread"));
+  });
+
   test("handleTextKey runs slash, n, and 1-9 before the inThread return", () => {
     const fn = handleTextKeySource();
     expect(fn.indexOf('text === "/"')).toBeLessThan(fn.indexOf("inThread"));
@@ -557,7 +568,7 @@ describe("QML safety invariants", () => {
     // Three read paths, all gated on `peeking`: the two post-load marks in
     // BlipView and readingSurface() in BarWidget (what the collector is told
     // is being read). Focus entering the compose field is the commit.
-    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen)");
+    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen, act)");
     expect(panel.split("root.markRead(root.threadRunningChat, seen)").length - 1).toBe(2);
     expect(panel).not.toContain("root.hostWidget.markThreadRead(");
     expect(panel).toContain("onActiveFocusChanged: if (activeFocus) root.commitPeek()");
@@ -854,7 +865,7 @@ test("reads require a rendered snapshot and carry its own timestamp", () => {
   expect(panel).toContain("root.markRead(root.threadRunningChat, seen)");   // through the peek gate, same `seen`
   expect(widget).toContain("s.rendered === true");
   expect(widget).toContain('return s ? String(s.seenTs || "") : ""');
-  expect(widget).toContain("function markThreadRead(chat, seen)");
+  expect(widget).toContain("function markThreadRead(chat, seen, act)");
   for (const host of ["./Panel.qml", "./BlipWindow.qml"]) {
     const src = readFileSync(new URL(host, import.meta.url), "utf8");
     expect(src).toContain("readonly property bool rendered: view.rendered");

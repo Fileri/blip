@@ -15,6 +15,7 @@ Going through Messages means the change syncs the way any read does.
 
     imsg-read --all              mark every conversation read
     imsg-read --chat <id>        mark ONE conversation read (DM or group)
+    imsg-read --unread <handle>  mark ONE conversation unread (DMs only)
     imsg-read --status           report whether this Mac can do it at all
 
 --all leaves the Mac alone: no window is raised, no selection changes, and
@@ -183,6 +184,34 @@ def settle(before, handle=None, tries=8, pause=0.4):
         if after == 0:
             return after
     return after
+
+
+def settle_unread(handle=None, tries=8, pause=0.4):
+    """Wait until Messages counts this chat (or any chat) as unread."""
+    after = unread_on_mac(handle)
+    for _ in range(tries):
+        if after is None or after > 0:
+            return after
+        time.sleep(pause)
+        after = unread_on_mac(handle)
+    return after
+
+
+def report_unread(before, after, ok):
+    """Exit 0 when the chat is unread on the Mac, including already-unread."""
+    if before is None or after is None:
+        sys.stderr.write("imsg-read: cannot verify read state in chat.db\n")
+        sys.exit(75)
+    if after > (before or 0):
+        print(f"marked ({before} -> {after} unread)")
+        return
+    if after > 0:
+        print("already unread")
+        return
+    why = ("Mark as Unread stayed disabled even after waking Messages, so the click could not land"
+           if not ok else "Mark as Unread was clicked but the chat is still read")
+    sys.stderr.write(f"imsg-read: {why}\n")
+    sys.exit(75)
 
 
 def report(before, after, ok, what):
@@ -378,16 +407,19 @@ def main() -> None:
         report(before, settle(before) if ok else before, ok, "Mark All as Read")
         return
 
-    if argv[0] == "--chat":
+    if argv[0] in ("--chat", "--unread"):
         if len(argv) < 2:
-            sys.stderr.write("imsg-read: --chat needs a handle\n")
+            sys.stderr.write("imsg-read: action needs a handle\n")
             sys.exit(64)
         handle = argv[1]
+        want_unread = argv[0] == "--unread"
         before = unread_on_mac(handle)
-        if before == 0:
-            print("nothing unread")     # and no reason to pull Messages forward
+        # Idempotency avoids opening an already-unread chat (which reads it)
+        # and prevents polling from repeatedly stealing focus.
+        if before is not None and ((before > 0) == want_unread):
+            print("already unread" if want_unread else "nothing unread")
             return
-        if "--through" in argv:
+        if not want_unread and "--through" in argv:
             i = argv.index("--through")
             if i + 1 >= len(argv) or newer_than_seen(handle, argv[i + 1]):
                 sys.stderr.write("imsg-read: newer inbound arrived; leaving it unread\n")
@@ -398,8 +430,7 @@ def main() -> None:
             if why:
                 sys.stderr.write(f"imsg-read: {why}\n")
                 sys.exit(64)
-            # Never toggle: a conversation already read offers Mark as Unread.
-            item = "Mark as Read"
+            item = "Mark as Unread" if want_unread else "Mark as Read"
             ok, err = click(item)
             # A disabled menu is dormant while Messages is in the background.
             # Wake it and click once more; a real error still fails immediately.
@@ -411,7 +442,11 @@ def main() -> None:
                 sys.exit(1)
             # Opening can itself read the chat. Always check the database,
             # even when the menu was absent, disabled, or the count unknown.
-            report(before, settle(before, handle), ok, item)
+            after = settle_unread(handle) if want_unread else settle(before, handle)
+            if want_unread:
+                report_unread(before, after, ok)
+            else:
+                report(before, after, ok, item)
         finally:
             restore_front(prev)
         return

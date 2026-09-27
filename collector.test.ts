@@ -48,6 +48,11 @@ import {
   CATCHUP_CHAT_ROWS,
   unreadCounts,
   unreadOldest,
+  stampBefore,
+  lastInboundTs,
+  effectiveMark,
+  pushUnreadArgs,
+  markUnreadOnMac,
   type ImsgMessage,
   type ChatInfo,
 } from "./collector";
@@ -169,6 +174,22 @@ describe("buildThreads", () => {
       { A: "2026-08-30T09:00:00Z" },
     );
     expect(threads[0]!.unread).toBe(0);
+  });
+
+  test("unreadSince may sit below the global mark and resurrects that chat only", () => {
+    const threads = buildThreads(
+      [
+        msg({ chat: "A", handle: "A", ts: "2026-08-30T09:30:00Z", read: true }),
+        msg({ chat: "B", handle: "B", ts: "2026-08-30T09:30:00Z", read: true }),
+      ],
+      "2026-08-30T10:00:00Z",
+      {},
+      {},
+      undefined,
+      { A: "2026-08-30T09:00:00Z" },
+    );
+    const byChat = Object.fromEntries(threads.map((t) => [t.chat, t.unread]));
+    expect(byChat).toEqual({ A: 1, B: 0 });
   });
 
   test("a null chat falls back to the handle — never the string \"null\"", () => {
@@ -709,6 +730,7 @@ describe("state and allowlist I/O", () => {
       unreadInitialized: true,
       selfChats: ["SELF"],
       readMarks: { A: "2026-08-30T09:30:00Z" },
+      unreadSince: {},
       groups: {},
       chatAliases: { OLD: "A" },
       pins: { A: 0 },
@@ -720,7 +742,7 @@ describe("state and allowlist I/O", () => {
   test("a missing state file yields a safe empty watermark", () => {
     expect(loadState(join(tmp(), "nope.json"))).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
     });
   });
 
@@ -729,7 +751,7 @@ describe("state and allowlist I/O", () => {
     writeFileSync(p, "{ this is not json");
     expect(loadState(p)).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
     });
   });
 
@@ -737,7 +759,7 @@ describe("state and allowlist I/O", () => {
     const p = join(tmp(), "big.json");
     saveState({
       watermark: "x", readMark: "x", unreadCounts: {}, unreadOldest: {}, unreadInitialized: true,
-      selfChats: [], readMarks: {}, groups: {}, toasted: Array.from({ length: 500 }, (_, i) => `k${i}`),
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, toasted: Array.from({ length: 500 }, (_, i) => `k${i}`),
     }, p);
     expect(loadState(p).toasted).toHaveLength(200);
   });
@@ -757,7 +779,7 @@ describe("state and allowlist I/O", () => {
     writeFileSync(blocker, "x");
     expect(saveState({
       watermark: "x", readMark: "x", unreadCounts: {}, unreadOldest: {}, unreadInitialized: true,
-      selfChats: [], readMarks: {}, groups: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, toasted: [],
     }, join(blocker, "state.json"))).toBe(false);
   });
 
@@ -1552,6 +1574,47 @@ describe("pushing read state back to the Mac", () => {
     expect(pushReadArgs("thread", { markRead: false, readChat: "chat900000000000000001" })).toEqual(["--chat", "chat900000000000000001"]);
     expect(pushReadArgs("thread", { markRead: false, readChat: "ce5a593a78af408282d61461ade89135" })).toEqual(["--chat", "ce5a593a78af408282d61461ade89135"]);
     expect(pushReadArgs("thread", { markRead: false, readChat: "" })).toBeNull();
+  });
+
+  test("mark-unread pushes --unread for DMs only", () => {
+    expect(pushUnreadArgs("+15550100011")).toEqual(["--unread", "+15550100011"]);
+    expect(pushUnreadArgs("them@example.com")).toEqual(["--unread", "them@example.com"]);
+    expect(pushUnreadArgs("ce5a593a78af408282d61461ade89135")).toBeNull();
+    expect(pushUnreadArgs("chat900000000000000001")).toBeNull();
+    expect(pushUnreadArgs("")).toBeNull();
+  });
+
+  test("mark-unread waits for the Mac and surfaces a failure", () => {
+    const ok = () => ({ status: 0, stdout: "marked\n", stderr: "" }) as never;
+    expect(markUnreadOnMac("+15550100011", "/home/u", ok)).toEqual({ ok: true, error: "" });
+    const no = () => ({ status: 77, stdout: "", stderr: "imsg-read: Accessibility is not granted.\n" }) as never;
+    expect(markUnreadOnMac("+15550100011", "/home/u", no).ok).toBe(false);
+    expect(markUnreadOnMac("ce5a593a78af408282d61461ade89135").error).toContain("groups");
+  });
+});
+
+describe("mark as unread", () => {
+  test("stampBefore is one second earlier", () => {
+    expect(stampBefore("2026-08-30T10:00:00Z")).toBe("2026-08-30T09:59:59Z");
+  });
+
+  test("lastInboundTs skips outbound and tapbacks", () => {
+    expect(lastInboundTs([
+      msg({ ts: "2026-08-30T09:00:00Z" }),
+      msg({ ts: "2026-08-30T11:00:00Z", from_me: true }),
+      msg({ ts: "2026-08-30T12:00:00Z", tapback: true }),
+    ], "+15551234567")).toBe("2026-08-30T09:00:00Z");
+  });
+
+  test("effectiveMark prefers unreadSince even below the global floor", () => {
+    expect(effectiveMark("A", "2026-08-30T10:00:00Z", { A: "2026-08-30T11:00:00Z" }, { A: "2026-08-30T09:00:00Z" }))
+      .toBe("2026-08-30T09:00:00Z");
+  });
+
+  test("unreadCounts honours unreadSince even when Apple already marked the row read", () => {
+    const rows = [msg({ chat: "A", handle: "A", ts: "2026-08-30T09:30:00Z", read: true })];
+    expect(unreadCounts(rows, "2026-08-30T10:00:00Z", {}, [], { A: "2026-08-30T09:00:00Z" })).toEqual({ A: 1 });
+    expect(unreadCounts(rows, "2026-08-30T10:00:00Z", {}, [])).toEqual({});
   });
 });
 
