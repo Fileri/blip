@@ -1745,7 +1745,7 @@ FocusScope {
             var seen = ""
             for (var k = 0; k < list.length; k++) {
               if (list[k].pending === true || list[k].scheduled === true) continue
-              var ts = String(list[k].ts || ""); if (ts > seen) seen = ts
+              var ts = String(list[k].seen_ts || list[k].ts || ""); if (ts > seen) seen = ts
             }
             // thread.ts hands back the sends it is still waiting on for this
             // chat; keep asking for a few seconds, then leave it to the next
@@ -2450,8 +2450,6 @@ FocusScope {
               }
               // Clear local marks and, unless push_read=off, ask Messages
               // on the Mac to mark its conversations read too.
-              // TapHandler, not MouseArea: the thread rows' proven pattern —
-              // the MouseArea version could lose clicks to the dismiss layer.
               Text {
                 id: markAllBtn
                 visible: root.unread > 0 && !root.searchShowing && !root.newMode

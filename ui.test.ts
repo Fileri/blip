@@ -718,6 +718,12 @@ test("no source file carries a merge conflict marker", () => {
 // pinned conversation's only unread signal — one unread in a pinned group
 // showed badge 1 and "nothing new in the app". The tile carries the same blue
 // dot the list rows do.
+test("the header unread count is conversations with a blue dot, not inbound rows", () => {
+  expect(widget).toContain("function unreadChatCount");
+  expect(widget).toContain("if ((Number(list[i].unread) || 0) > 0) n++");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
 test("a pinned tile shows the unread dot", () => {
   expect(panel).toContain("id: pinnedUnreadDot");
   const dot = panel.slice(panel.indexOf("id: pinnedUnreadDot"), panel.indexOf("id: pinnedUnreadDot") + 700);
@@ -1088,4 +1094,18 @@ describe("a multi-part send is pinned to the thread it started in", () => {
     const pump = panel.slice(panel.indexOf("function pumpFileSend"), panel.indexOf("function copyText"));
     expect(pump).not.toContain("root.active.service");
   });
+});
+
+// Poll no-op detection must follow optimistic reads, unreads and deletes too.
+// A cache assigned only by polls lets a stale result change the count without
+// updating the actual list, producing a badge with more entries than its tooltip.
+test("poll snapshots compare against the current rendered list", () => {
+  expect(widget).toContain("readonly property string threadsJson: JSON.stringify(threads)");
+  expect(widget).not.toContain("root.threadsJson =");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
+test("rendered reactions advance the visible read boundary", () => {
+  expect(panel).toContain('String(list[k].seen_ts || list[k].ts || "")');
+  expect(panel).toContain("if (list[k].pending === true || list[k].scheduled === true) continue");
 });

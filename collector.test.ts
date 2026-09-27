@@ -1048,9 +1048,29 @@ describe("phone-synced read state (imsg ≥1.9.0 `read`)", () => {
     expect(counts["+15551234567"]).toBe(1);
   });
 
-  test("locally-read messages stay read regardless of Apple state", () => {
+  test("Apple-unread still badges below the global floor (iPhone badge)", () => {
     const counts = unreadCounts([m({ read: false })], "2026-08-31T23:00:00Z", {});
+    expect(counts["+15551234567"]).toBe(1);
+  });
+
+  test("opening a thread still hides its Apple-unread rows", () => {
+    const counts = unreadCounts(
+      [m({ read: false })],
+      "2026-08-31T00:00:00Z",
+      { "+15551234567": "2026-08-31T12:00:00Z" },
+    );
     expect(counts["+15551234567"]).toBeUndefined();
+  });
+
+  test("a read tip hides older is_read=0 ghosts; an unread tip badges", () => {
+    expect(unreadCounts([
+      m({ ts: "2026-08-31T10:00:00Z", read: false }),
+      m({ ts: "2026-08-31T12:00:00Z", read: true }),
+    ], "2026-08-31T00:00:00Z", {})).toEqual({});
+    expect(unreadCounts([
+      m({ ts: "2026-08-31T10:00:00Z", read: true }),
+      m({ ts: "2026-08-31T12:00:00Z", read: false }),
+    ], "2026-08-31T23:00:00Z", {})["+15551234567"]).toBe(1);
   });
 });
 
