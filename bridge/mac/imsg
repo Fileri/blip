@@ -66,6 +66,18 @@ ATTACHMENT_MIME_SQL = """COALESCE(NULLIF(a.mime_type, ''), CASE a.uti
     WHEN 'com.apple.quicktime-movie' THEN 'video/quicktime'
     WHEN 'public.mpeg-4' THEN 'video/mp4'
     END)"""
+
+
+def attachment_mime_sql(con) -> str:
+    """MIME expression for an attachment row.
+
+    Older chat.db schemas, and the unit-test fixtures, have mime_type and no
+    uti column. Referencing a.uti there aborts the whole chat list."""
+    # Index 1 is the column name for both a bare tuple and a sqlite3.Row.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(attachment)")}
+    return ATTACHMENT_MIME_SQL if "uti" in cols else "a.mime_type"
+
+
 CONTACT_HELPER = os.path.expanduser("~/.blip/bin/contact-delete")
 
 # ---------- Contacts name resolution (built-in, no external deps) ----------
@@ -945,7 +957,7 @@ def enrich(con, rows, with_names: bool):
     for a in _chunked_in(
         con,
         f"""SELECT maj.message_id AS mid, a.ROWID AS aid, a.transfer_name AS name,
-                  {ATTACHMENT_MIME_SQL} AS mime, a.total_bytes AS bytes
+                  {attachment_mime_sql(con)} AS mime, a.total_bytes AS bytes
            FROM message_attachment_join maj
            JOIN attachment a ON a.ROWID = maj.attachment_id
            WHERE a.transfer_name IS NOT NULL
@@ -1397,7 +1409,7 @@ def cmd_chats(con, args):
         attachments = {}
         for attachment in _chunked_in(
             con,
-            f"""SELECT maj.message_id AS mid, a.transfer_name AS name, {ATTACHMENT_MIME_SQL} AS mime
+            f"""SELECT maj.message_id AS mid, a.transfer_name AS name, {attachment_mime_sql(con)} AS mime
                  FROM message_attachment_join maj
                  JOIN attachment a ON a.ROWID = maj.attachment_id
                 WHERE maj.message_id IN ({{marks}})
@@ -2003,7 +2015,7 @@ def cmd_attachment(con, args):
     if not re.fullmatch(r"[0-9]{1,18}", args.id):
         sys.exit("error: attachment id must be decimal digits")
     row = con.execute(
-        f"""SELECT a.filename, {ATTACHMENT_MIME_SQL} AS mime_type
+        f"""SELECT a.filename, {attachment_mime_sql(con)} AS mime_type
             FROM attachment a
             JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
             JOIN {MESSAGE_SRC} m ON m.ROWID = maj.message_id
