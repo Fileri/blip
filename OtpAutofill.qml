@@ -72,8 +72,23 @@ Item {
         }
       }
     }
-    onExited: { root.ready = false; root.offer = null; root.buffer = "" }
+    onExited: {
+      root.ready = false; root.offer = null; root.buffer = ""
+      // A dead helper would leave autofill off until the next shell restart.
+      if (root.enabled) respawn.restart()
+    }
   }
+  Timer {
+    id: respawn
+    property int attempts: 0
+    interval: Math.min(60000, 5000 * Math.pow(2, attempts))
+    onTriggered: {
+      if (!root.enabled || helper.running) return
+      attempts = Math.min(attempts + 1, 4)
+      helper.running = Qt.binding(() => root.enabled)
+    }
+  }
+  onReadyChanged: if (ready) respawn.attempts = 0
   Timer {
     interval: 200; repeat: true; running: root.offer !== null
     onTriggered: { root.now = Date.now(); if (root.offer && root.now >= root.offer.deadline) root.offer = null }
