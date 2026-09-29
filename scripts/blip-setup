@@ -49,10 +49,14 @@ conf="$conf_dir/bridge.conf"
 # bridge.conf is DATA (audit #7): read the two keys we care about, never source it.
 prev_automation=""; prev_country=""; prev_bin_dir=""
 if [[ -r "$conf" ]]; then
-  [[ -z "$host" ]] && host="$(sed -n 's/^host=//p' "$conf" | head -1 | tr -d '"\x27 ')"
-  prev_automation="$(sed -n 's/^automation=//p' "$conf" | head -1 | tr -d '"\x27 ')"
-  prev_country="$(sed -n 's/^country_code=//p' "$conf" | head -1 | tr -d '"\x27 ')"
-  prev_bin_dir="$(sed -n 's/^[[:space:]]*bin_dir[[:space:]]*=//p' "$conf" | head -1 | tr -d '"\x27 ')"
+  # tr has no \xHH hex escapes: `tr -d '"\x27 '` deletes the literal characters
+  # ", \, x, 2, 7 and space, which turned host=chadhs@192.168.110.106 into
+  # chadhs@19.168.110.106 and rewrote the mangled value back into bridge.conf.
+  # \047 is the apostrophe in tr's octal form; the set here is ", ', and space.
+  [[ -z "$host" ]] && host="$(sed -n 's/^host=//p' "$conf" | head -1 | tr -d '"\047 ')"
+  prev_automation="$(sed -n 's/^automation=//p' "$conf" | head -1 | tr -d '"\047 ')"
+  prev_country="$(sed -n 's/^country_code=//p' "$conf" | head -1 | tr -d '"\047 ')"
+  prev_bin_dir="$(sed -n 's/^[[:space:]]*bin_dir[[:space:]]*=//p' "$conf" | head -1 | tr -d '"\047 ')"
 fi
 # Where the shims go. Same rules as bin-dir.ts, so Blip looks where we install:
 # ~ and $HOME expand here; anything but a plain absolute path means ~/bin.
