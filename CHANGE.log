@@ -42,6 +42,14 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-09-30  #124 blip-setup no longer drops every 2, 7 and x from bridge.conf values (tr has no \xHH escape, so host=you@192.168.x
+                 came back as 19.168.x and was written back broken). Chad Stovern, github.com/chadhs, X: none found (checked
+                 2026-09-30; @chadhs on X is someone else), asked on the PR
+2026-09-30  #123 Up/Down/Home/End in the compose field keep the selected history bubble (closes #118). Erik Fillipsveen,
+                 github.com/Fileri, X: none found
+2026-09-30  #119 CLAUDE.md contact-review bullet reads as one sentence again. Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-30  (direct)  CI green again: imsg_test.py's fixture lacked the uti column a131ae5 reads; main was red 26-30 Sep.
+                 Fred Nix / Larry, X https://x.com/nixfred
 2026-09-29  (direct)  Code autofill no longer crashes when the accessibility bus is unreachable. libatspi aborts the helper
                  (SIGABRT, 10 cores on gus in one day) if it cannot connect, so otp-desktop.py now probes the bus first,
                  with backoff for 30 s, and exits 75 instead. OtpAutofill.qml respawns a dead helper (5 s doubling to

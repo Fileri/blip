@@ -25,7 +25,31 @@ reconstructed on Sunday from memory.
 
 ---
 
-## 2026-W39 (Mon 21 Sep to Sun 27 Sep): OPEN, post due Sun 27 Sep
+## 2026-W40 (Mon 28 Sep to Sun 4 Oct): OPEN, post due Sun 4 Oct
+
+3 PRs merged so far, from 3 people. Five more are in review.
+
+### Wed 30 Sep: three merges, two reviews
+
+- **#124 blip-setup kept host=192.168.x.x intact.** Chad Stovern (github.com/chadhs,
+  new contributor; no X published, asked on the PR). `tr -d '"\x27 '` is not
+  a hex escape to tr, so it deleted every 2, 7 and x from bridge.conf values:
+  host=chadhs@192.168.110.106 came back as 19.168.110.106 and was written back,
+  so every re-run failed. Reproduced both halves by hand before merging.
+- **#123 Up/Down in the compose field keep the selected bubble.** Erik
+  Fillipsveen (github.com/Fileri), closes #118 as agreed with Jon Kinney.
+- **#119 one sentence in CLAUDE.md again.** Ian Swope (https://x.com/ianfs).
+- **Our own:** CI was red on main from 26 to 30 Sep because the voice-message
+  change read a column one test fixture did not have; the file is named
+  `*_test.py` and was never in my local run. Fixed, all 15 bridge test files
+  now run by both name patterns.
+- **In review, changes requested:** Erik's tapbacks (#116/#117, answers #69):
+  opt-in, no new prompts, 673 + 146 tests green, one cross-day wrong-message
+  case to close first. Damon Janis's read-sync series (#120-#122, replaces
+  #103): sound design; a focus bug in Pin/Mute, a per-poll cost, blocking
+  Mac calls and an unhealthy state on old bridges to fix.
+
+## 2026-W39 (Mon 21 Sep to Sun 27 Sep): post due Sun 27 Sep
 
 4 PRs merged so far, from 3 people.
 

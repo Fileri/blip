@@ -42,6 +42,7 @@ Nobody right now.
 | joshhattan | joshhattan | 2 | nothing published; asked on the PR 2026-09-19 |
 | David Reinecke | dreinecke | 1 (+ issues) | nothing published, 2026-09-25 |
 | cw228 | cw228 | 1 | nothing published; asked on the PR 2026-09-18 |
+| Chad Stovern | chadhs | 1 | nothing published (@chadhs on X is someone else); asked on #124 2026-09-30 |
 | "Unhook Dev" | tolewis | 1 | nothing published, 2026-09-25 |
 
 ## Issue reporters who changed the code
