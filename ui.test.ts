@@ -504,7 +504,7 @@ describe("QML safety invariants", () => {
     expect(page).toContain("leaveBubbles()");
   });
 
-  test("draft navigation keeps normal caret movement and clears history selection", () => {
+  test("draft navigation keeps normal caret movement and leaves history selection alone", () => {
     // The selection is a target for actions; it must never outlive the rows
     // it indexes (a reload renumbers them) and Esc must drop it before leaving.
     expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
@@ -518,8 +518,10 @@ describe("QML safety invariants", () => {
     expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
     expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
     expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
-    expect(panel).toContain("event.key === Qt.Key_Home || event.key === Qt.Key_End");
-    expect(panel).toContain("root.clearBubbleCursor()\n                    event.accepted = composeField.moveAtBoundary(event.key, event.modifiers)");
+    // Up/Down/Home/End move the caret and leave the selected bubble alone
+    const caretKeys = panel.slice(panel.indexOf("event.key === Qt.Key_Home || event.key === Qt.Key_End"), panel.indexOf("composeField.moveAtBoundary(event.key, event.modifiers)"));
+    expect(caretKeys).toContain("event.key === Qt.Key_Home");
+    expect(caretKeys).not.toContain("clearBubbleCursor");
     expect(panel).not.toContain("var onFirstLine");
   });
 
