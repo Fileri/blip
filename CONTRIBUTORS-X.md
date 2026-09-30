@@ -28,6 +28,7 @@ tags are at the bottom.
 | Brenden Bishop | bbishdotdev | https://x.com/bbishdotdev | 1 | his site bbish.dev |
 | Kb2uka | Kb2uka | https://x.com/StudioXRadio | 1 | said so himself on #91 ("@StudioXRadio, tag away"), 2026-09-18; recorded 2026-09-26 |
 | Brad Larson | followbl | https://x.com/followbl | 1 | confirmed by Brad on #113, 2026-09-26 |
+| Chad Stovern | chadhs | https://x.com/chadstovern | 1 | he said so himself on #124, 2026-09-30 |
 | Baden | badenpiland | https://x.com/badenpiland | 1 | GitHub profile + social accounts (older notes said @bhp35, which does not exist) |
 
 ## Likely, waiting on Fred
@@ -42,7 +43,6 @@ Nobody right now.
 | joshhattan | joshhattan | 2 | nothing published; asked on the PR 2026-09-19 |
 | David Reinecke | dreinecke | 1 (+ issues) | nothing published, 2026-09-25 |
 | cw228 | cw228 | 1 | nothing published; asked on the PR 2026-09-18 |
-| Chad Stovern | chadhs | 1 | nothing published (@chadhs on X is someone else); asked on #124 2026-09-30 |
 | "Unhook Dev" | tolewis | 1 | nothing published, 2026-09-25 |
 
 ## Issue reporters who changed the code
@@ -53,7 +53,7 @@ None have published an X account (checked 2026-09-25): jacobaross, Zain Nayer
 ## Paste block
 
 ```
-@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl @StudioXRadio
+@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl @StudioXRadio @chadstovern
 ```
 
 Plus by name: Erik Fillipsveen (github.com/Fileri), joshhattan,

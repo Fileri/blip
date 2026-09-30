@@ -32,7 +32,7 @@ reconstructed on Sunday from memory.
 ### Wed 30 Sep: three merges, two reviews
 
 - **#124 blip-setup kept host=192.168.x.x intact.** Chad Stovern (github.com/chadhs,
-  new contributor; no X published, asked on the PR). `tr -d '"\x27 '` is not
+  new contributor; X https://x.com/chadstovern, confirmed on the PR). `tr -d '"\x27 '` is not
   a hex escape to tr, so it deleted every 2, 7 and x from bridge.conf values:
   host=chadhs@192.168.110.106 came back as 19.168.110.106 and was written back,
   so every re-run failed. Reproduced both halves by hand before merging.

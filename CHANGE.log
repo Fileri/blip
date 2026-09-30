@@ -33,6 +33,7 @@ PEOPLE (verified handles)
   Brad Larson       github.com/followbl     X https://x.com/followbl     (confirmed by Brad himself on #113, 2026-09-26)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
   Kb2uka            github.com/Kb2uka       X https://x.com/StudioXRadio (he said so on #91, 2026-09-18: "@StudioXRadio, tag away")
+  Chad Stovern      github.com/chadhs       X https://x.com/chadstovern  (he said so on #124, 2026-09-30)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -43,8 +44,8 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
 2026-09-30  #124 blip-setup no longer drops every 2, 7 and x from bridge.conf values (tr has no \xHH escape, so host=you@192.168.x
-                 came back as 19.168.x and was written back broken). Chad Stovern, github.com/chadhs, X: none found (checked
-                 2026-09-30; @chadhs on X is someone else), asked on the PR
+                 came back as 19.168.x and was written back broken). Chad Stovern, github.com/chadhs, X https://x.com/chadstovern
+                 (he said so on the PR)
 2026-09-30  #123 Up/Down/Home/End in the compose field keep the selected history bubble (closes #118). Erik Fillipsveen,
                  github.com/Fileri, X: none found
 2026-09-30  #119 CLAUDE.md contact-review bullet reads as one sentence again. Ian Swope, github.com/ianswope, X https://x.com/ianfs
