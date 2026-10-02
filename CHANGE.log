@@ -43,6 +43,10 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-10-02  #116 #117 Outbound tapbacks from Linux, behind tapbacks=on (closes #69): pick one of six in the message menu,
+                 the Mac performs it on the exact bubble through Accessibility and chat.db confirms it. Groups refused, no
+                 new consent prompt. Our 1fbc737 fixed a later-day same-time twin taking the reaction. Erik Fillipsveen,
+                 github.com/Fileri, X: none found
 2026-10-02  #121 Mark as Unread / Mark as Read in the conversation menu (right-click, or U). DMs go to the Mac through
                  Messages' own menu item and count only when chat.db agrees; groups stay local. Deployed gus, vic, fnix bridge.
                  Damon Janis, github.com/damonjanis, X https://x.com/damonjanis

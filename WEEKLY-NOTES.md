@@ -27,9 +27,18 @@ reconstructed on Sunday from memory.
 
 ## 2026-W40 (Mon 28 Sep to Sun 4 Oct): OPEN, post due Sun 4 Oct
 
-5 PRs merged so far, from 4 people.
+7 PRs merged so far, from 4 people.
 
 ### Thu 1 Oct and Fri 2 Oct: #120 and #121
+
+- **#116 + #117 outbound tapbacks (closes #69).** Erik Fillipsveen
+  (github.com/Fileri). Pick a tapback in the message menu and the Mac
+  performs it on that exact bubble through Accessibility, with SIP on;
+  chat.db is the referee. Off unless `tapbacks=on`; groups refused; no new
+  permission prompt. Before merging we fixed the one review finding
+  ourselves (1fbc737): an identical message at the same time of day on a
+  LATER day could take the reaction, because the transcript shows HH:MM
+  only. 709 tests; deployed everywhere, switched off by default.
 
 - **#120 read state syncs through a durable, verified queue.** Damon Janis
   (https://x.com/damonjanis), replaces his #103. Every read is saved before
