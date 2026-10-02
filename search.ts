@@ -83,7 +83,12 @@ export function shapeResults(raw: ImsgMessage[], query: string, limit: number): 
   const out: (SearchHit & { score: number })[] = [];
   // Use the thread loader's sender-aware echo rules before discarding empty
   // bodies: an empty outgoing self row can identify its decoded incoming twin.
-  for (const m of dedupeSelfEcho(raw)) {
+  // Outgoing rows lead. `imsg search` answers newest first, and a self-thread
+  // message that Messages in iCloud re-synced has SEVERAL incoming copies;
+  // dedupeSelfEcho folds a copy only into a row of the opposite direction, so
+  // two copies ahead of the sent row left one behind as an incoming hit.
+  const rows = [...raw].sort((a, b) => Number(b.from_me === true) - Number(a.from_me === true));
+  for (const m of dedupeSelfEcho(rows)) {
     const body = (m.text ?? "").replace(/\uFFFC/g, "").trim();
     if (body === "") continue;
     out.push({

@@ -43,6 +43,18 @@ describe("search self echoes", () => {
     expect(hits[0]!.text).toBe("yes");
   });
 
+  test("re-synced incoming copies ahead of the sent row still collapse to one hit from me", () => {
+    // The bridge answers newest first: two re-synced copies, the sent row, its echo.
+    const hits = shapeResults([
+      message({ id: 9, chat: "+15551234567" }),
+      message({ id: 8, chat: "+15551234567" }),
+      message({ id: 1, chat: "+15551234567", from_me: true }),
+      message({ id: 2, chat: "+15551234567" }),
+    ], "yes", 10);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.from_me).toBe(true);
+  });
+
   test("search runner preserves both group hits through shaping and limiting", () => {
     const rows = [message({ id: 1, from_me: true }), message({ id: 2, handle: "+15557654321" })];
     const runner = ((_cmd: string, args: string[], options: { input: string }) => {
