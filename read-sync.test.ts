@@ -1,0 +1,186 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
+
+const chat = "+15551234567";
+const old = "2026-09-01T10:00:00Z";
+const recent = "2026-09-01T11:00:00Z";
+const snapshot = (unread = 1, latest = old) => ({ version: 1, chats: [{ chat, unread, oldest: unread ? old : "", latest }] });
+
+describe("read sync state machine", () => {
+  test("a group id is a durable read intent", () => {
+    const group = "ce5a593a78af408282d61461ade89135";
+    const pending = queueReadIntent({}, group, false, old);
+    expect(parseReadIntents(pending)[group]!.unread).toBe(false);
+    expect(parseReadIntents({ "not a chat": pending[group]! })).toEqual({});
+  });
+  test("partial or malformed snapshots cannot clear the ledger", () => {
+    expect(parseReadSnapshot({ chats: [] })).toBeNull();
+    expect(parseReadSnapshot({ version: 1, chats: [{ chat, unread: -1 }] })).toBeNull();
+    expect(parseReadSnapshot({ version: 1, chats: [] })).toEqual({});
+    expect(parseReadIntents({ [chat]: { unread: false, seen: old, attempts: -1, retryAt: 0 } })).toEqual({});
+  });
+  test("failed action survives identical polls and uses bounded backoff", () => {
+    const pending = queueReadIntent({}, chat, false, old);
+    pending[chat] = retryReadIntent(pending[chat]!, 1000);
+    expect(queueReadIntent(pending, chat, false, old)).toBe(pending);
+    expect(pending[chat]!.retryAt).toBe(3000);
+    expect(retryReadIntent({ ...pending[chat]!, attempts: 100 }, 1000).retryAt).toBe(61000);
+    expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot())!)).toEqual(pending);
+    expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot(0))!)).toEqual({});
+  });
+  test("later intent wins, and a stale read cannot clear a new inbound", () => {
+    const pending = queueReadIntent(queueReadIntent({}, chat, false, old), chat, true);
+    expect(pending[chat]!.unread).toBe(true);
+    expect(reconcileReadIntents(queueReadIntent({}, chat, false, old), parseReadSnapshot(snapshot(1, recent))!)).toEqual({});
+  });
+  test("a mark-all does not cover a message that arrives after the click", () => {
+    const pending = queueReadIntent({}, "*", false, old);
+    const later = { version: 1, chats: [
+      { chat, unread: 0, oldest: "", latest: old },
+      { chat: "+15550001111", unread: 1, oldest: recent, latest: recent },
+    ]};
+    expect(reconcileReadIntents(pending, parseReadSnapshot(later)!)).toEqual({});
+    const still = { version: 1, chats: [
+      { chat, unread: 1, oldest: old, latest: old },
+      { chat: "+15550001111", unread: 1, oldest: recent, latest: recent },
+    ]};
+    expect(reconcileReadIntents(pending, parseReadSnapshot(still)!)["*"]).toBeTruthy();
+  });
+  test("mark-all followed by unread keeps the unread until mark-all lands", () => {
+    const pending = queueReadIntent(queueReadIntent({}, "*", false), chat, true);
+    expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot(1))!)).toEqual(pending);
+    expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot(0))!)).toEqual({ [chat]: pending[chat]! });
+  });
+});
+
+/** A complete collector process with an isolated HOME and synthetic bridge.
+ * Nothing here calls the real Mac or reads the user's state. */
+function fixture(unread = 1) {
+  const home = mkdtempSync(join(tmpdir(), "blip-sync-"));
+  mkdirSync(join(home, "bin"));
+  mkdirSync(join(home, ".config/blip"), { recursive: true });
+  mkdirSync(join(home, ".local/state/blip"), { recursive: true });
+  writeFileSync(join(home, ".config/blip/bridge.conf"), "push_read=thread\n");
+  const put = (file: string, v: unknown) => writeFileSync(join(home, file), JSON.stringify(v));
+  put("remote.json", snapshot(unread));
+  put("control.json", {});
+  const bridge = `#!/usr/bin/env python3
+import json,os,sys
+home=os.environ['HOME']; args=sys.argv[1:]
+ctl=json.load(open(home+'/control.json'))
+if ctl.get('offline'): sys.exit(69)
+if 'read-state' in args:
+ if ctl.get('snapshot_fail'): sys.exit(64)
+ print(open(home+'/remote.json').read())
+elif 'groups' in args: print('[]')
+elif 'chats' in args: print(json.dumps([{'id':'${chat}','last':'${old}','last_text':'fixture','last_from_me':False}]))
+else:
+ print(json.dumps([{'id':1,'chat':'${chat}','handle':'${chat}','name':None,'service':'iMessage','ts':ctl.get('latest','${old}'),'from_me':False,'text':'fixture','read':False}]))
+`;
+  writeFileSync(join(home, "bin/imsg"), bridge, { mode: 0o755 });
+  writeFileSync(join(home, "bin/imsg-read"), `#!/usr/bin/env python3
+import json,os,sys
+home=os.environ['HOME']; args=sys.argv[1:]
+with open(home+'/actions.jsonl','a') as f: f.write(json.dumps(args)+'\\n')
+ctl=json.load(open(home+'/control.json'))
+if ctl.get('fail'):
+ print('imsg-read: Accessibility is not granted',file=sys.stderr); sys.exit(77)
+data=json.load(open(home+'/remote.json'))
+for r in data['chats']:
+ if '--all' in args or r['chat']==args[1]:
+  r['unread']=1 if '--unread' in args else 0
+  r['oldest']=r['latest'] if r['unread'] else ''
+with open(home+'/remote.json','w') as f: json.dump(data,f)
+print('verified')
+`, { mode: 0o755 });
+  const statePath = join(home, ".local/state/blip/state.json");
+  const state = () => JSON.parse(readFileSync(statePath, "utf8"));
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [join(import.meta.dir, "collector.ts"), "--deep", ...args], {
+      encoding: "utf8", env: { ...process.env, HOME: home }, timeout: 10000,
+    });
+    expect(result.status).toBe(0);
+    const out = JSON.parse(result.stdout);
+    expect(out.error).not.toContain("TypeError");
+    return out;
+  };
+  const actions = () => { try { return readFileSync(join(home, "actions.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)); } catch { return []; } };
+  return { home, put, run, state, actions, save: (s: unknown) => writeFileSync(statePath, JSON.stringify(s)) };
+}
+
+describe("collector read sync lifecycle", () => {
+  test("opening an unread chat pushes once, even if a local mark already hid it", () => {
+    const f = fixture(); f.run();
+    f.save({ ...f.state(), readMarks: { [chat]: recent }, unreadCounts: {} });
+    expect(f.run("--read", chat, "--seen", old).unread).toBe(0);
+    expect(f.actions()).toEqual([["--chat", chat, "--through", old]]);
+    f.run("--read", chat, "--seen", old);
+    expect(f.actions()).toHaveLength(1);
+    expect(f.state().pendingReads).toEqual({});
+  });
+  test("failure stays queued, survives restart, then clears on verified retry", () => {
+    const f = fixture(); f.put("control.json", { fail: true });
+    expect(f.run("--read", chat, "--seen", old).error).toContain("Accessibility");
+    expect(f.state().pendingReads[chat].attempts).toBe(1);
+    f.run("--read", chat, "--seen", old);
+    expect(f.actions()).toHaveLength(1);
+    f.put("control.json", {});
+    const st = f.state(); st.pendingReads[chat].retryAt = 0; f.save(st);
+    f.run();
+    expect(f.actions()).toHaveLength(2);
+    expect(f.state().pendingReads).toEqual({});
+  });
+  test("new inbound beyond --seen remains unread and cancels an old retry", () => {
+    const f = fixture(); f.run();
+    f.save({ ...f.state(), pendingReads: queueReadIntent({}, chat, false, old) });
+    f.put("remote.json", snapshot(1, recent));
+    expect(f.run("--read", chat, "--seen", old).unread).toBe(1);
+    expect(f.actions()).toHaveLength(0);
+  });
+  test("old chats outside previews are present in the complete unread metadata", () => {
+    const f = fixture(0);
+    const data = snapshot(0);
+    data.chats.push({ chat: "+15557654321", unread: 1, oldest: "2020-01-01T00:00:00Z", latest: "2020-01-01T00:00:00Z" });
+    f.put("remote.json", data);
+    const out = f.run();
+    expect(out.unreadCounts["+15557654321"]).toBe(1);
+    expect(out.unread).toBe(1);
+  });
+});
+
+
+describe("policy and ordering integration", () => {
+  test("gesture-only policy keeps a local read of an old message across polls", () => {
+    const f = fixture();
+    writeFileSync(join(f.home, ".config/blip/bridge.conf"), "push_read=all\n");
+    f.run();
+    expect(f.run("--read", chat, "--seen", old).unread).toBe(0);
+    expect(f.run().unread).toBe(0);
+    expect(f.actions()).toHaveLength(0);
+  });
+  test("fallback snapshot failure does not consume a newer unseen inbound", () => {
+    const f = fixture(); f.run();
+    f.put("control.json", { snapshot_fail: true, latest: recent });
+    expect(f.run("--read", chat, "--seen", old).unread).toBe(1);
+    expect(f.actions()).toHaveLength(0);
+  });
+});
+
+
+test("a due retry cannot jump ahead of a fresh action for another chat", () => {
+  const other = "+15557654321";
+  const f = fixture(); f.run();
+  const remote = snapshot(1);
+  remote.chats.push({ chat: other, unread: 1, oldest: old, latest: old });
+  f.put("remote.json", remote);
+  f.save({ ...f.state(), pendingReads: {
+    [chat]: { unread: false, seen: old, attempts: 2, retryAt: Date.now() - 1 },
+    [other]: { unread: false, seen: old, attempts: 0, retryAt: 0 },
+  } });
+  f.run();
+  expect(f.actions()[0]).toEqual(["--chat", other, "--through", old]);
+});

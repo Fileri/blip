@@ -28,6 +28,7 @@ Item {
     id: root
     property var threads: []
     property var localReads: ({})
+    property var localUnreads: ({})
     property int unread: 0
     property int generation: 0
     @BINDING@
@@ -49,18 +50,19 @@ Item {
             root.generation++
             root.threads = []
             root.localReads = ({})
+            root.localUnreads = ({})
             root.unread = 0
         }
         function test_expired_read_then_identical_poll() {
             var original = rows()
             root.poll(original)
             root.markThreadRead("A", original[0].last_ts)
-            compare(root.unread, 2)
+            compare(root.unread, 1) // conversations, not the remaining message rows
             // A slow/failed collector write can outlive optimistic suppression.
             root.localReads = {A: {ts: original[0].last_ts, at: Date.now() - 61000}}
             root.poll(root.applyLocalReads(original))
             compare(root.threads[0].unread, 1)
-            compare(root.unread, 3)
+            compare(root.unread, 2)
         }
         function test_mark_all_then_identical_poll() {
             var original = rows()
@@ -71,18 +73,18 @@ Item {
             root.poll(root.applyLocalReads(original))
             compare(root.threads[0].unread, 1)
             compare(root.threads[1].unread, 2)
-            compare(root.unread, 3)
+            compare(root.unread, 2)
         }
         function test_read_suppresses_inflight_poll_until_new_activity() {
             var original = rows()
             root.poll(original)
             root.markThreadRead("A", original[0].last_ts)
             root.poll(root.applyLocalReads(original))
-            compare(root.unread, 2)
+            compare(root.unread, 1)
             compare(root.threads[0].unread, 0)
             original[0].last_ts = "2026-09-01T11:00:00Z"
             root.poll(root.applyLocalReads(original))
-            compare(root.unread, 3)
+            compare(root.unread, 2)
             compare(root.threads[0].unread, 1)
         }
         function test_identical_poll_does_not_replace_model() {
@@ -94,7 +96,7 @@ Item {
     }
 }
 '''.replace("@BINDING@", binding).replace("@FUNCTIONS@", "\n".join(
-        function(name) for name in ("noteLocalRead", "applyLocalReads",
+        function(name) for name in ("unreadChatCount", "noteLocalRead", "applyLocalReads",
                                     "markThreadRead", "markAllRead")
     )).replace("@UPDATE@", source[start:end])
 

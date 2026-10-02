@@ -53,7 +53,17 @@ class AttachmentMime(unittest.TestCase):
     def test_marks_placeholder_survives_the_fstring(self) -> None:
         src = IMSG.read_text()
         self.assertNotIn("IN ({marks})\"\"\",\n        rowids", src.replace("{{marks}}", "OK"))
-        self.assertEqual(src.count("{ATTACHMENT_MIME_SQL}"), 3)
+        self.assertEqual(src.count("{attachment_mime_sql(con)}"), 3)
+
+    def test_schema_without_uti_uses_mime_type_only(self) -> None:
+        con = sqlite3.connect(":memory:")
+        con.execute("CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, mime_type TEXT)")
+        self.assertEqual(self.imsg.attachment_mime_sql(con), "a.mime_type")
+        con.execute("INSERT INTO attachment VALUES (1, 'image/png')")
+        got = con.execute(
+            f"SELECT {self.imsg.attachment_mime_sql(con)} FROM attachment a"
+        ).fetchone()[0]
+        self.assertEqual(got, "image/png")
 
 
 if __name__ == "__main__":
