@@ -13,7 +13,7 @@ import { shimPath } from "./shim-path";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { chatKey, isGroupChat, type ImsgMessage } from "./collector";
+import { chatKey, dedupeSelfEcho, isGroupChat, type ImsgMessage } from "./collector";
 import { fuzzyScore } from "./contact-search";
 
 const HOME = process.env.HOME ?? homedir();
@@ -81,17 +81,11 @@ export function messageMatchScore(query: string, text: string): number {
  *  rows are dropped. Self-thread echo twins collapse to one hit. */
 export function shapeResults(raw: ImsgMessage[], query: string, limit: number): SearchHit[] {
   const out: (SearchHit & { score: number })[] = [];
-  const seen = new Map<string, boolean>();
-  for (const m of raw) {
+  // Use the thread loader's sender-aware echo rules before discarding empty
+  // bodies: an empty outgoing self row can identify its decoded incoming twin.
+  for (const m of dedupeSelfEcho(raw)) {
     const body = (m.text ?? "").replace(/\uFFFC/g, "").trim();
     if (body === "") continue;
-    // A twin is the self-thread ECHO: same chat, second and text, OPPOSITE
-    // direction. Two members answering "yes" in the same second are two
-    // messages (Astra B#7).
-    const twinKey = `${chatKey(m)}\0${m.ts}\0${body}`;
-    const prior = seen.get(twinKey);
-    if (prior !== undefined && prior !== Boolean(m.from_me)) continue;
-    seen.set(twinKey, Boolean(m.from_me));
     out.push({
       chat: chatKey(m),
       name: m.name ?? m.handle ?? chatKey(m),
