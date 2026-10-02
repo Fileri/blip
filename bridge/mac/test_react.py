@@ -169,6 +169,34 @@ class Resolve(unittest.TestCase):
         self.assertEqual((t["text"], t["from_me"], t["chat"], t["self_thread"]), ("ok", True, FRIEND, False))
         self.assertEqual(t["newest"], {"text": "bye", "from_me": False, "hhmm": react.hhmm(T0 + 2 * MINUTE)})
 
+    def test_a_later_day_twin_at_the_same_hhmm_is_counted(self):
+        # The transcript labels bubbles with HH:MM only, so yesterday's "ok" at
+        # 09:15 and today's "ok" at 09:15 look identical to the scan. Counting
+        # stopped at the first new minute, the ordinal stayed 0, and the
+        # newest-first scan reacted to TODAY's (review of #116, 2026-09-30).
+        day = 24 * 60 * MINUTE
+        add(self.con, 1, "YESTERDAY", "ok", True, T0)
+        add(self.con, 1, "BETWEEN", "something else", True, T0 + MINUTE)
+        add(self.con, 1, "TODAY", "ok", True, T0 + day)
+        add(self.con, 1, "NOT_SAME_TIME", "ok", True, T0 + day + MINUTE)
+        self.assertEqual(self.resolve("YESTERDAY")["ordinal"], 1)
+        self.assertEqual(self.resolve("TODAY")["ordinal"], 0)
+
+    def test_too_many_later_rows_refuses_instead_of_guessing(self):
+        add(self.con, 1, "OLD", "ok", True, T0)
+        for i in range(5):
+            add(self.con, 1, f"L{i}", f"later {i}", True, T0 + (i + 1) * MINUTE)
+        old = react.LATER_SCAN
+        react.LATER_SCAN = 5
+        try:
+            with self.assertRaises(react.Stop) as stop:
+                self.resolve("OLD")
+            self.assertEqual((stop.exception.result["code"], stop.exception.exit_code), ("ambiguous", react.EX_TEMPFAIL))
+            react.LATER_SCAN = 6
+            self.assertEqual(self.resolve("OLD")["ordinal"], 0)
+        finally:
+            react.LATER_SCAN = old
+
     def test_deleted_look_alikes_are_not_counted(self):
         # Messages does not draw Recently Deleted rows; counting one below the
         # target would aim at the look-alike above it.

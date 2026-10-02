@@ -107,6 +107,7 @@ ROW_SETTLE = 3.0     # after a retry: time for a late first row to show before t
 RUN_LIMIT = 60.0     # paging stops here (the longest run measured took 33 s); read push waits 150 s for the lock
 JXA_TIMEOUT = 45     # one scan or page; they take 1-3 s
 SELF_TWIN_NS = 3_000_000_000   # a self-thread echo is written within 3 s of its sent row
+LATER_SCAN = 5000   # later rows checked for an identical HH:MM twin; at the cap, refuse (exit 75)
 
 EX_NOT_OFFERED, EX_USAGE, EX_UNSUPPORTED, EX_UNAVAILABLE, EX_SOFTWARE, EX_TEMPFAIL, EX_NOPERM = 1, 64, 65, 69, 70, 75, 77
 # osascript errors that may come after the action went through
@@ -226,17 +227,26 @@ def resolve(con, imsg, guid: str, self_handles: list) -> dict:
         if sent:
             from_me, date, rowid = True, sent["date"], sent["ROWID"]
 
-    # Bubbles below the target that look exactly like it (same side, minute
-    # and text). The transcript orders by (date, ROWID); self-thread echoes
-    # can share a nanosecond, so the tie-break matters.
+    # Bubbles below the target that look exactly like it (same side, HH:MM
+    # and text). The transcript labels a bubble with its time of day only, so
+    # a twin on a LATER DAY at the same HH:MM is just as identical to the scan
+    # as one in the same minute: counting stopped at the first new minute,
+    # the ordinal stayed 0, and the newest-first scan reacted to the later
+    # twin (review of #116, 2026-09-30). Count across every later row. The
+    # transcript orders by (date, ROWID); self-thread echoes can share a
+    # nanosecond, so the tie-break matters.
     minute = hhmm(date)
     ordinal = 0
+    scanned = 0
     for r in bubbles(con, chats, "m.is_from_me = ? AND (m.date > ? OR (m.date = ? AND m.ROWID > ?))",
-                     "m.date, m.ROWID LIMIT 2000", (int(from_me), date, date, rowid)):
-        if hhmm(r["date"]) != minute:
-            break   # ordered by date: once past the minute, nothing later can match
-        if r["guid"] not in guids and norm(imsg.message_text(r)) == text:
+                     f"m.date, m.ROWID LIMIT {LATER_SCAN}", (int(from_me), date, date, rowid)):
+        scanned += 1
+        if hhmm(r["date"]) == minute and r["guid"] not in guids and norm(imsg.message_text(r)) == text:
             ordinal += 1
+    # A twin past the scan window would go uncounted and the count would land
+    # on a neighbour. Refuse rather than guess.
+    if scanned >= LATER_SCAN:
+        raise Stop("ambiguous", EX_TEMPFAIL, f"more than {LATER_SCAN} later messages on this side; cannot rule out an identical bubble")
 
     # The bottom check compares the lowest rendered text bubble with the
     # newest text message: pictures, cards and links have no text label to
