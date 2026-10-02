@@ -1,4 +1,4 @@
-// Pure quotation formatting, shared with the QML renderer.
+// Pure message helpers (quotation, the selected bubble), shared with the QML renderer.
 // Rebuild: bun build message-actions.ts --target browser --format esm --outfile MessageActions.mjs
 export interface QuotableMessage {
   text?: string;
@@ -19,4 +19,12 @@ export function quotedDraft(message: QuotableMessage, draft: string): string {
   const points = Array.from(text);
   const excerpt = points.length > 200 ? points.slice(0, 200).join("") + "…" : text;
   return "> " + excerpt + "\n\n" + draft;
+}
+
+/** Where the selected bubble is after a reload: the row with the same guid,
+ *  or -1 when it is gone or has none. A reload renumbers the rows, and a
+ *  tapback landing on the selected bubble is itself a reload. */
+export function bubbleIndexByGuid(bubbles: { guid?: string }[], guid: string): number {
+  if (!guid) return -1;
+  return (bubbles || []).findIndex((b) => String(b?.guid || "") === guid);
 }

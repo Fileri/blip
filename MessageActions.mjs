@@ -14,7 +14,13 @@ function quotedDraft(message, draft) {
 
 ` + draft;
 }
+function bubbleIndexByGuid(bubbles, guid) {
+  if (!guid)
+    return -1;
+  return (bubbles || []).findIndex((b) => String(b?.guid || "") === guid);
+}
 export {
+  bubbleIndexByGuid,
   quoteText,
   quotedDraft
 };

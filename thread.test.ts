@@ -732,6 +732,44 @@ describe("Send Later bubbles", () => {
   });
 });
 
+describe("tapback targets", () => {
+  test("a bubble carries its row's GUID, or \"\" without one", () => {
+    const out = decorate([msg({ guid: "p-1" }), msg({ ts: "2026-08-30T12:01:00Z" })], "2026-08-30");
+    expect(out.map((b) => b.guid)).toEqual(["p-1", ""]);
+  });
+
+  test("in the self-thread every tapback is yours, and its echo folds into it", () => {
+    // Messages writes your tapback there as an inbound row from your own
+    // address; the menu has to know it is yours to offer taking it back.
+    const self = "+15551234567";
+    const out = selectThread(
+      [msg({
+        chat: self, from_me: true, text: "note",
+        tapbacks: [{ emoji: "❤️", from_me: false, by: "Me" }, { emoji: "❤️", from_me: true, by: null }],
+      })],
+      self, false, 80, [self],
+    );
+    expect(out[0]!.tapbacks).toEqual([{ emoji: "❤️", from_me: true, by: null }]);
+  });
+
+  test("one same-second twin in a 1:1 is a coincidence, not a self-thread", () => {
+    // both sides typing "ok" in the same second must not make their tapback yours
+    const them = [{ emoji: "👍", from_me: false, by: "Test Person" }];
+    const out = selectThread(
+      [msg({ from_me: true, text: "ok" }), msg({ text: "ok", tapbacks: them })],
+      "+15551234567", false, 80, [],
+    );
+    // (the thread view may still fold the pair into one row; the tapback stays theirs)
+    expect(out.flatMap((m) => m.tapbacks ?? [])).toEqual(them);
+  });
+
+  test("anywhere else a tapback stays whoever's it was", () => {
+    const them = [{ emoji: "👍", from_me: false, by: "Test Person" }];
+    const out = selectThread([msg({ tapbacks: them })], "+15551234567", false, 80, []);
+    expect(out[0]!.tapbacks).toEqual(them);
+  });
+});
+
 test("reading a displayed reaction covers its activity without moving the original bubble", () => {
   const original = "2026-09-01T10:00:00Z";
   const reaction = "2026-09-01T11:00:00Z";

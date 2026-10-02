@@ -9,10 +9,10 @@ treating a Mac as the gateway. Read this before touching anything.
 (Mac side)    bridge/mac/           VENDORED from claude-on-mac (pin in bridge/BRIDGE-VERSION; refresh with
               imsg imsg-send        scripts/sync-bridge.sh <rev>). Installed to ~/.blip/bin on the Mac by
               contacts tcc-check    bridge/mac/install.sh. Blip is ONE source for release (Fred's rule).
-              blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the six tools run.
+              blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the tools in its TOOLS set run.
                                     imsg: sqlite read of chat.db, `--rich` (tapbacks/read_at/reply_to/
                                     attachments/error), `watch`, `attachment`, `chats`; Recently Deleted hidden.
-(Linux side)  bridge/linux/blip-shim installed as ~/bin/{imsg,imsg-send,imsg-read,contacts,contact-save} by scripts/blip-setup
+(Linux side)  bridge/linux/blip-shim installed as ~/bin/{imsg,imsg-send,imsg-read,imsg-react,contacts,contact-save} by scripts/blip-setup
                                     (bin_dir= in bridge.conf moves them; bin-dir.ts parses it);
                                     reads ~/.config/blip/bridge.conf (host=, remote_bin='$HOME/.blip/bin'
                                     — single-quoted, expands on the MAC). `ssh -n` preflight; exit 69 offline.
@@ -283,7 +283,7 @@ what it is handed. Keep it that way.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,
-  `link_previews`, `push_read`, `hide_spam`, `hide_unknown`, `prefer_imessage`,
+  `link_previews`, `push_read`, `hide_spam`, `hide_unknown`, `prefer_imessage`, `tapbacks`,
   `scroll_gain`, `touchpad_scroll_gain`, `smooth_scroll`, plus the mute list. Anything worth configuring
   becomes another key. Settled 2026-09-04 against PR #21, which proposed a
   `preferences.json` with eleven knobs and a ~1300-line settings panel: it was

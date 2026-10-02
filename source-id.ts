@@ -9,8 +9,9 @@
 // answer. Rebuild the QML module:
 //   bun build source-id.ts --target browser --format esm --outfile SourceId.mjs
 
-/** The Mac-side tools a conversation is read, sent and marked read through. */
-export type BridgeTool = "imsg" | "imsg-send" | "imsg-read";
+/** The Mac-side tools a conversation is read, sent, marked read and
+ *  tapbacked through. */
+export type BridgeTool = "imsg" | "imsg-send" | "imsg-read" | "imsg-react";
 
 export interface Source {
   /** Stable lowercase name, e.g. "imessage". */

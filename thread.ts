@@ -17,8 +17,10 @@ import { readFileSync } from "node:fs";
 import {
   chatKey,
   dedupeSelfEcho,
+  detectSelfChats,
   isGroupChat,
   loadState,
+  mergeTapbacks,
   normalizeMsgStamps,
   type AttachmentMeta,
   type ImsgMessage,
@@ -58,6 +60,9 @@ export interface Bubble {
   /** Read boundary includes reactions without moving the bubble's display time. */
   seen_ts?: string;
   ts: string;
+  /** The row's Messages GUID, which actions on this bubble aim at
+   *  (tapbacks); "" when the bridge did not supply one. */
+  guid: string;
   from_me: boolean;
   name: string;
   text: string;
@@ -305,6 +310,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
 
     out.push({
       ts: m.ts,
+      guid: m.guid ?? "",
       seen_ts: m.activity_ts && m.activity_ts > m.ts ? m.activity_ts : m.ts,
       from_me: m.from_me,
       name: m.name ?? m.handle ?? "",
@@ -534,7 +540,18 @@ export function selectThread(
     ? raw.filter((m) => isGroupChat(chatKey(m)))
     : raw.filter((m) => ids.has(chatKey(m)) || (m.handle === chat && !isGroupChat(chatKey(m))));
   msgs = [...msgs].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const selves = new Set([...selfChats, ...detectSelfChats(msgs, 2)]);
   msgs = dedupeSelfEcho(msgs, selfChats);
+  // One person is in a self-thread, so every tapback there is yours, though
+  // Messages writes them as inbound echoes from your own address. Said so
+  // here, the menu can offer to take one back, and two copies of the same
+  // tapback fold into one. Detected as the collector promotes one, from two
+  // twins: a single same-second "ok" would hand you the other person's tapback.
+  msgs = msgs.map((m) =>
+    selves.has(chatKey(m)) && (m.tapbacks ?? []).some((t) => !t.from_me)
+      ? { ...m, tapbacks: mergeTapbacks((m.tapbacks ?? []).map((t) => ({ ...t, from_me: true, by: null }))) }
+      : m,
+  );
   return msgs.length > limit ? msgs.slice(msgs.length - limit) : msgs;
 }
 
