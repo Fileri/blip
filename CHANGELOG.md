@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Search no longer drops a reply that matches your own (#126, Greyforge
+  Labs).** In a group, your "yes" and another member's "yes" in the same
+  second came back as one hit, and a note to yourself could show as incoming
+  depending on which copy the Mac returned first. Search now uses the same
+  echo rules as the conversation view.
 - **Voice messages play.** An iPhone voice message ("Audio Message.caf") arrived
   with no MIME type in chat.db, only Apple's type code, so Blip saved it as a
   `.bin` and refused to open it. The Mac bridge now fills a missing MIME from

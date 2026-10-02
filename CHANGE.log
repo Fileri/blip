@@ -34,6 +34,7 @@ PEOPLE (verified handles)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
   Kb2uka            github.com/Kb2uka       X https://x.com/StudioXRadio (he said so on #91, 2026-09-18: "@StudioXRadio, tag away")
   Chad Stovern      github.com/chadhs       X https://x.com/chadstovern  (he said so on #124, 2026-09-30)
+  Greyforge Labs    github.com/GreyforgeLabs X https://x.com/GreyforgeLabs (GitHub profile twitter_username AND social_accounts; X name matches, checked 2026-10-02)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -43,6 +44,12 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-10-02  #126 Search keeps sender-aware self echoes: your "yes" and another group member's "yes" in the same second are two
+                 hits again, and a note to yourself is attributed to you whichever copy the Mac returns first. Search now
+                 reuses dedupeSelfEcho. Our follow-up feeds outgoing rows first, so a self-thread message iCloud re-synced
+                 as 3 or 4 incoming copies is one hit (query "test" on Fred's Mac: 340 hits before, 286 with the PR, 196
+                 with the follow-up; every other conversation unchanged). Greyforge Labs, github.com/GreyforgeLabs,
+                 X https://x.com/GreyforgeLabs (first Blip PR)
 2026-10-02  #116 #117 Outbound tapbacks from Linux, behind tapbacks=on (closes #69): pick one of six in the message menu,
                  the Mac performs it on the exact bubble through Accessibility and chat.db confirms it. Groups refused, no
                  new consent prompt. Our 1fbc737 fixed a later-day same-time twin taking the reaction. Erik Fillipsveen,

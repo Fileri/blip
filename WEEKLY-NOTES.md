@@ -27,9 +27,24 @@ reconstructed on Sunday from memory.
 
 ## 2026-W40 (Mon 28 Sep to Sun 4 Oct): OPEN, post due Sun 4 Oct
 
-7 PRs merged so far, from 4 people.
+8 PRs merged so far, from 5 people.
 
 ### Thu 1 Oct and Fri 2 Oct: #120 and #121
+
+- **#126 search keeps a reply that matches your own.** Greyforge Labs
+  (github.com/GreyforgeLabs, new contributor; X https://x.com/GreyforgeLabs,
+  published on the GitHub profile). In a group, your "yes" and another
+  member's "yes" in the same second showed as one search hit, because
+  search's echo key ignored the sender; a note to yourself could show as
+  incoming. Search now reuses the echo rules the conversation view already
+  had. Verified: all four new tests fail on the old code, 676 pass with the
+  PR. Measured on Fred's Mac, four queries of 400 rows each: every other
+  conversation's hits are identical before and after. **Our follow-up:** his
+  self-thread holds 3 or 4 incoming copies of each note (iCloud re-sync), and
+  search answers newest first, so one copy still survived as an incoming
+  hit; search now hands outgoing rows to the dedupe first. Query "test":
+  340 hits before, 286 with the PR, 196 with the follow-up. Not seen in live
+  data: the same-second group case itself, which only the tests cover.
 
 - **#116 + #117 outbound tapbacks (closes #69).** Erik Fillipsveen
   (github.com/Fileri). Pick a tapback in the message menu and the Mac
