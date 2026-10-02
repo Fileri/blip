@@ -572,7 +572,9 @@ BarWidget {
     // (Mac down, watcher restarting) it is the old 6 s poll.
     // offline: back off to 30 s — a Mac that is off for the night must not
     // eat a bun + ssh probe every 6 s (war room #19); "ready" restores 6 s
-    interval: root.watchAlive ? 10000 : (root.online ? 6000 : 30000)
+    // 60 s while the watcher is alive: the watcher pushes arrivals, so this
+    // poll is only a safety net. #120 cut it to 10 s, six times the ssh cost.
+    interval: root.watchAlive ? 60000 : (root.online ? 6000 : 30000)
     running: root.leader
     repeat: true
     triggeredOnStart: true
