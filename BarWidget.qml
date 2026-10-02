@@ -357,9 +357,11 @@ BarWidget {
   }
   property bool collectorReserved: false // a queued run owns the next event-loop turn
 
-  function refresh(deep, markRead, readChat, seen) {
+  function refresh(deep, markRead, readChat, seen, unreadChat, act, actTarget) {
     var req = { deep: deep === true, markRead: markRead === true,
-                readChat: String(readChat || ""), seen: String(seen || "") }
+                readChat: String(readChat || ""), seen: String(seen || ""),
+                unreadChat: String(unreadChat || ""),
+                act: String(act || ""), actTarget: String(actTarget || "") }
     if (collector.running || collectorReserved) { enqueueRefresh(req); return }
     runRefresh(req)
   }
@@ -370,7 +372,9 @@ BarWidget {
     var args = ["bun", collectorPath]
     if (req.deep) args.push("--deep")
     if (req.markRead) args.push("--mark-read")
-    if (req.readChat !== "") {
+    if (req.unreadChat) args.push("--mark-unread", req.unreadChat)
+    if (req.act) { args.push("--act", req.act); if (req.actTarget) args.push("--target", req.actTarget) }
+    if (req.readChat !== "" && req.readChat !== req.unreadChat) {
       args.push("--read", req.readChat)
       if (req.seen !== "") args.push("--seen", req.seen)
     }
@@ -388,19 +392,38 @@ BarWidget {
   // genuinely NEWER inbound message exists. Entries expire once persisted
   // state has caught up (or after 60s, whichever first).
   property var localReads: ({})
+  property var localUnreads: ({})
 
   function noteLocalRead(chat, lastTs) {
     var m = Object.assign({}, localReads)
     m[String(chat)] = { ts: String(lastTs || ""), at: Date.now() }
     localReads = m
+    var u = Object.assign({}, localUnreads)
+    if (u[String(chat)]) { delete u[String(chat)]; localUnreads = u }
+  }
+
+  function noteLocalUnread(chat) {
+    var u = Object.assign({}, localUnreads)
+    u[String(chat)] = { at: Date.now() }
+    localUnreads = u
+    var m = Object.assign({}, localReads)
+    if (m[String(chat)]) { delete m[String(chat)]; localReads = m }
   }
 
   function applyLocalReads(list) {
     var now = Date.now()
     var m = Object.assign({}, localReads)
+    var u = Object.assign({}, localUnreads)
     var dirty = false
     var out = list.map(function(t) {
-      var r = m[String(t.chat)]
+      var id = String(t.chat)
+      var forced = u[id]
+      if (forced) {
+        if (now - forced.at > 60000) { delete u[id]; dirty = true }
+        else if (Number(t.unread) > 0) { delete u[id]; dirty = true; return t }
+        else return Object.assign({}, t, { unread: 1 })
+      }
+      var r = m[id]
       if (!r) return t
       // persistence caught up (or nothing left) — retire the entry so stale
       // suppression rules can't linger for the TTL (Codex #5)
@@ -412,14 +435,14 @@ BarWidget {
       if (String(t.last_ts) > r.ts) return t
       return Object.assign({}, t, { unread: 0 })
     })
-    if (dirty) localReads = m
+    if (dirty) { localReads = m; localUnreads = u }
     return out
   }
 
   /** `seen` = the newest ts the surface actually rendered. Without it the
    *  mark went through the sidebar's last_ts, which can be a message that
    *  arrived after the snapshot the user is looking at (Astra A#3). */
-  function markThreadRead(chat, seen) {
+  function markThreadRead(chat, seen, act) {
     var c = String(chat)
     var lastTs = seen ? String(seen) : ""
     var list = threads.map(function(t) {
@@ -430,10 +453,23 @@ BarWidget {
     noteLocalRead(c, lastTs)
     threads = list
     unread = unreadChatCount(list)
-    refresh(true, false, c, lastTs)
+    refresh(true, false, c, lastTs, "", act || "", act ? c : "")
+  }
+
+  function markThreadUnread(chat) {
+    var c = String(chat)
+    var list = threads.map(function(t) {
+      if (String(t.chat) !== c) return t
+      return Number(t.unread) > 0 ? t : Object.assign({}, t, { unread: 1 })
+    })
+    noteLocalUnread(c)
+    threads = list
+    unread = unreadChatCount(list)
+    refresh(true, false, "", "", c)
   }
 
   function markAllRead() {
+    localUnreads = ({})
     for (var i = 0; i < threads.length; i++)
       noteLocalRead(String(threads[i].chat), String(threads[i].last_ts || ""))
     threads = threads.map(function(t) {

@@ -1,7 +1,7 @@
 // read-sync.ts
 function enqueueRefresh(queue, req) {
   const q = queue.slice();
-  const barrier = (r) => r.markRead;
+  const barrier = (r) => r.markRead || r.unreadChat || r.act;
   if (!barrier(req)) {
     for (let i = q.length - 1;i >= 0; i--) {
       if (barrier(q[i]))

@@ -152,6 +152,9 @@ class Actions(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(io.StringIO()):
                 self.tool.report(before, after, True, 'Mark as Read')
             self.assertEqual(ctx.exception.code, 75)
+            with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(io.StringIO()):
+                self.tool.report_unread(before, after, True)
+            self.assertEqual(ctx.exception.code, 75)
 
     def test_partial_mark_all_is_not_acknowledged(self):
         with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(io.StringIO()):
@@ -164,17 +167,27 @@ class Actions(unittest.TestCase):
         mocks = {}
         for name, result in [('ensure_messages', ''), ('accessibility', ''), ('unread_on_mac', before),
                              ('frontmost', 'Previous'), ('select_chat', ''), ('wake_messages', 'Previous'),
-                             ('click', (False, '')), ('settle', after), ('restore_front', None)]:
+                             ('click', (False, '')), ('settle', after), ('settle_unread', after), ('restore_front', None)]:
             mocks[name] = stack.enter_context(patch.object(self.tool, name, return_value=result))
         stack.enter_context(patch.object(sys, 'argv', ['imsg-read', flag, '+15551234567']))
         stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
         self.tool.main()
         return mocks
 
+    def test_already_unread_is_not_opened_and_read_accidentally(self):
+        mocks = self.main('--unread', 1, 1)
+        mocks['select_chat'].assert_not_called()
+        mocks['click'].assert_not_called()
+
     def test_read_wakes_menu_and_accepts_selection_read_with_absent_item(self):
         mocks = self.main('--chat', 1, 0)
         mocks['wake_messages'].assert_called_once()
         mocks['settle'].assert_called_once_with(1, '+15551234567')
+        mocks['restore_front'].assert_called_once_with('Previous')
+
+    def test_unread_waits_for_verified_state_and_restores_focus(self):
+        mocks = self.main('--unread', 0, 1)
+        mocks['settle_unread'].assert_called_once_with('+15551234567')
         mocks['restore_front'].assert_called_once_with('Previous')
 
     def test_settle_waits_until_all_are_read_not_just_one(self):

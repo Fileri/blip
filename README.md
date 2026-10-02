@@ -120,6 +120,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - contact photo (from the Mac's Contacts), a group's own photo from Messages when it has one, or initials · name, preview, time
 - **pinned conversations mirrored from Messages on the Mac**, kept in the same order at the top (read-only)
 - **blue dot** that stays until you open *that* conversation — iMessage semantics, not "I glanced at the list"
+- **mark as unread** — right-click a row, or `U` in the list; DMs also click Messages' own menu on the Mac so the phone can follow
 - groups titled the way Messages.app titles them: the group's name, else its members
 
 </td>
@@ -801,7 +802,7 @@ read actions local. Per-thread actions briefly select the conversation in
 Messages and restore the previous app's focus. With `push_read=thread`, a
 group read reaches the Mac through Messages' groupid link, not only mark-all.
 
-Read actions are saved before contacting the Mac, verified against
+Read/unread actions are saved before contacting the Mac, verified against
 Messages' database, and retried after temporary failures or reconnects.
 Permission errors stay visible in Blip until resolved. A newer inbound beyond
 the visible `--seen` timestamp cancels an old read retry so it stays unread.

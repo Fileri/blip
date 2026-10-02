@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
+import { enqueueRefresh, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
 
 const chat = "+15551234567";
 const old = "2026-09-01T10:00:00Z";
@@ -54,6 +54,13 @@ describe("read sync state machine", () => {
     const pending = queueReadIntent(queueReadIntent({}, "*", false), chat, true);
     expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot(1))!)).toEqual(pending);
     expect(reconcileReadIntents(pending, parseReadSnapshot(snapshot(0))!)).toEqual({ [chat]: pending[chat]! });
+  });
+  test("coalescing preserves read-unread-read order", () => {
+    const read = { readChat: chat, seen: old, deep: false, markRead: false, unreadChat: "", act: "" };
+    const unread = { ...read, readChat: "", unreadChat: chat };
+    const q = enqueueRefresh(enqueueRefresh([read], unread), { ...read, seen: recent });
+    expect(q.map(r => r.unreadChat ? "unread" : "read")).toEqual(["read", "unread", "read"]);
+    expect(enqueueRefresh([read], { ...read, seen: recent })).toHaveLength(1);
   });
 });
 
@@ -134,12 +141,30 @@ describe("collector read sync lifecycle", () => {
     expect(f.actions()).toHaveLength(2);
     expect(f.state().pendingReads).toEqual({});
   });
+  test("offline mark-unread survives and a subsequent Mac read clears Blip", () => {
+    const f = fixture(0); f.put("control.json", { offline: true });
+    expect(f.run("--mark-unread", chat).online).toBe(false);
+    expect(f.state().pendingReads[chat].unread).toBe(true);
+    f.put("control.json", {});
+    expect(f.run().unread).toBe(1);
+    expect(f.actions()).toEqual([["--unread", chat]]);
+    f.put("remote.json", snapshot(0));
+    expect(f.run().unread).toBe(0);
+    expect(f.state().unreadSince).toEqual({});
+  });
   test("new inbound beyond --seen remains unread and cancels an old retry", () => {
     const f = fixture(); f.run();
     f.save({ ...f.state(), pendingReads: queueReadIntent({}, chat, false, old) });
     f.put("remote.json", snapshot(1, recent));
     expect(f.run("--read", chat, "--seen", old).unread).toBe(1);
     expect(f.actions()).toHaveLength(0);
+  });
+  test("Mac mark-unread bypasses a historical local read mark; Mac read retires old unread override", () => {
+    const f = fixture(); f.run();
+    f.save({ ...f.state(), readMarks: { [chat]: recent }, unreadSince: { [chat]: old } });
+    expect(f.run().unread).toBe(1);
+    f.put("remote.json", snapshot(0));
+    expect(f.run().unread).toBe(0);
   });
   test("old chats outside previews are present in the complete unread metadata", () => {
     const f = fixture(0);
@@ -150,10 +175,23 @@ describe("collector read sync lifecycle", () => {
     expect(out.unreadCounts["+15557654321"]).toBe(1);
     expect(out.unread).toBe(1);
   });
+  test("push_read=off never calls the Mac, including explicit menu reads", () => {
+    const f = fixture();
+    writeFileSync(join(f.home, ".config/blip/bridge.conf"), "push_read=off\n");
+    f.run("--act", "read", "--target", chat, "--read", chat, "--seen", old);
+    expect(f.actions()).toHaveLength(0);
+  });
 });
 
 
 describe("policy and ordering integration", () => {
+  test("local-only mark unread survives later snapshots without a Mac action", () => {
+    const f = fixture(0);
+    writeFileSync(join(f.home, ".config/blip/bridge.conf"), "push_read=off\n");
+    expect(f.run("--mark-unread", chat).unread).toBe(1);
+    expect(f.run().unread).toBe(1);
+    expect(f.actions()).toHaveLength(0);
+  });
   test("gesture-only policy keeps a local read of an old message across polls", () => {
     const f = fixture();
     writeFileSync(join(f.home, ".config/blip/bridge.conf"), "push_read=all\n");
@@ -161,6 +199,20 @@ describe("policy and ordering integration", () => {
     expect(f.run("--read", chat, "--seen", old).unread).toBe(0);
     expect(f.run().unread).toBe(0);
     expect(f.actions()).toHaveLength(0);
+  });
+  test("offline unread then read sends only the last requested state", () => {
+    const f = fixture(); f.put("control.json", { offline: true });
+    f.run("--mark-unread", chat);
+    f.run("--act", "read", "--target", chat, "--read", chat, "--seen", old);
+    f.put("control.json", {}); f.run();
+    expect(f.actions()).toEqual([["--chat", chat, "--through", old]]);
+  });
+  test("unread queued after offline mark-all lands after mark-all", () => {
+    const f = fixture(); f.put("control.json", { offline: true });
+    f.run("--mark-read"); f.run("--mark-unread", chat);
+    f.put("control.json", {}); f.run(); f.run();
+    expect(f.actions()).toEqual([["--all"], ["--unread", chat]]);
+    expect(f.run().unread).toBe(1);
   });
   test("fallback snapshot failure does not consume a newer unseen inbound", () => {
     const f = fixture(); f.run();
@@ -170,6 +222,41 @@ describe("policy and ordering integration", () => {
   });
 });
 
+
+describe("repeated read/unread convergence", () => {
+  test("every four-click offline read/unread sequence converges to the last click", () => {
+    for (let mask = 0; mask < 16; mask++) {
+      const f = fixture(mask % 2);
+      f.put("control.json", { offline: true });
+      let wantUnread = false;
+      for (let bit = 0; bit < 4; bit++) {
+        wantUnread = Boolean(mask & (1 << bit));
+        if (wantUnread) f.run("--mark-unread", chat);
+        else f.run("--act", "read", "--target", chat, "--read", chat, "--seen", old);
+      }
+      f.put("control.json", {});
+      f.run();
+      const out = f.run();
+      expect(out.unread).toBe(wantUnread ? 1 : 0);
+      expect(f.state().pendingReads).toEqual({});
+      expect(f.actions().length).toBeLessThanOrEqual(1);
+    }
+  }, 20000);
+  test("alternating local and Mac gestures converge without stale overrides", () => {
+    const f = fixture(0);
+    const steps = ["unread", "read", "mac-unread", "mac-read", "unread", "mac-read", "mac-unread", "read"];
+    for (const step of steps) {
+      const wantUnread = step.endsWith("unread");
+      if (step.startsWith("mac-")) f.put("remote.json", snapshot(wantUnread ? 1 : 0));
+      else if (wantUnread) f.run("--mark-unread", chat);
+      else f.run("--read", chat, "--seen", old);
+      const out = f.run();
+      expect(out.unread).toBe(wantUnread ? 1 : 0);
+      expect(out.threads.filter((t: { unread: number }) => t.unread > 0).length).toBe(out.unread);
+      expect(f.state().pendingReads).toEqual({});
+    }
+  }, 10000);
+});
 
 test("a due retry cannot jump ahead of a fresh action for another chat", () => {
   const other = "+15557654321";

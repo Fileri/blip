@@ -9,12 +9,17 @@
   default player opens. Re-run `blip-setup` so the Mac's `imsg` picks this up.
   Audio plays with no window (mpv opened an empty black one); click the chip
   again to stop it.
+- **Conversation menu.** Right-click is Mark as Unread or Mark as Read.
+  Read-state clicks Messages' own menu (DMs). Mark as Unread stays on direct
+  messages. A group read still reaches the Mac through
+  Messages' groupid link. Mark-all-read stays on the list, the `a` key, and
+  the bar right-click.
 - **Blue dots follow Messages' `is_read`, not only the read cursor.** Mark as
   Unread can leave `last_read_message_timestamp` ahead of a row that is still
   unread. The dot follows the newest inbound `is_read=0`, including a reaction.
   The header and the bar badge count conversations, not messages.
-- **Read sync retries until the Mac agrees.** A read is saved before the
-  push and retried with backoff. `read_state.py` is the shared
+- **Read sync retries until the Mac agrees.** A read or unread click is saved
+  before the push and retried with backoff. `read_state.py` is the shared
   metadata snapshot, including manual unread below Apple's cursor and merged
   phone/email DMs. Re-run `blip-setup` so the Mac picks up `read_state.py`.
 
