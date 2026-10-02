@@ -27,7 +27,19 @@ reconstructed on Sunday from memory.
 
 ## 2026-W40 (Mon 28 Sep to Sun 4 Oct): OPEN, post due Sun 4 Oct
 
-3 PRs merged so far, from 3 people. Five more are in review.
+5 PRs merged so far, from 4 people.
+
+### Thu 1 Oct and Fri 2 Oct: #120 and #121
+
+- **#120 read state syncs through a durable, verified queue.** Damon Janis
+  (https://x.com/damonjanis), replaces his #103. Every read is saved before
+  any Mac call, retried with backoff, and retired only when chat.db confirms
+  it. Merged 1 Oct with Fred's OK, deployed 2 Oct with the new Mac bridge.
+  Watcher-alive poll restored from 10 s to 60 s; the per-poll snapshot cost
+  and a blocking 180 s Mac call are open in #125.
+- **#121 Mark as Unread / Mark as Read.** Damon again. Right-click or U;
+  DMs through Messages' own menu item, verified in chat.db; groups local.
+  672 tests green; deployed gus, vic and the Mac bridge.
 
 ### Wed 30 Sep: three merges, two reviews
 

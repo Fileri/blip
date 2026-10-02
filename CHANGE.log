@@ -43,6 +43,9 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-10-02  #121 Mark as Unread / Mark as Read in the conversation menu (right-click, or U). DMs go to the Mac through
+                 Messages' own menu item and count only when chat.db agrees; groups stay local. Deployed gus, vic, fnix bridge.
+                 Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
 2026-10-02  #120 Read state syncs through a durable, verified queue: every read is saved before any Mac call, retried with
                  backoff, and retired only when chat.db confirms it; replaces #103. Merged 10-01 (Fred's OK), deployed 10-02
                  with the new Mac bridge (read_state.py). Watcher-alive poll restored to 60 s; snapshot cost and blocking
