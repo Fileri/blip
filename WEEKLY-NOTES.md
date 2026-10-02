@@ -25,7 +25,43 @@ reconstructed on Sunday from memory.
 
 ---
 
-## 2026-W39 (Mon 21 Sep to Sun 27 Sep): OPEN, post due Sun 27 Sep
+## 2026-W40 (Mon 28 Sep to Sun 4 Oct): OPEN, post due Sun 4 Oct
+
+5 PRs merged so far, from 4 people.
+
+### Thu 1 Oct and Fri 2 Oct: #120 and #121
+
+- **#120 read state syncs through a durable, verified queue.** Damon Janis
+  (https://x.com/damonjanis), replaces his #103. Every read is saved before
+  any Mac call, retried with backoff, and retired only when chat.db confirms
+  it. Merged 1 Oct with Fred's OK, deployed 2 Oct with the new Mac bridge.
+  Watcher-alive poll restored from 10 s to 60 s; the per-poll snapshot cost
+  and a blocking 180 s Mac call are open in #125.
+- **#121 Mark as Unread / Mark as Read.** Damon again. Right-click or U;
+  DMs through Messages' own menu item, verified in chat.db; groups local.
+  672 tests green; deployed gus, vic and the Mac bridge.
+
+### Wed 30 Sep: three merges, two reviews
+
+- **#124 blip-setup kept host=192.168.x.x intact.** Chad Stovern (github.com/chadhs,
+  new contributor; X https://x.com/chadstovern, confirmed on the PR). `tr -d '"\x27 '` is not
+  a hex escape to tr, so it deleted every 2, 7 and x from bridge.conf values:
+  host=chadhs@192.168.110.106 came back as 19.168.110.106 and was written back,
+  so every re-run failed. Reproduced both halves by hand before merging.
+- **#123 Up/Down in the compose field keep the selected bubble.** Erik
+  Fillipsveen (github.com/Fileri), closes #118 as agreed with Jon Kinney.
+- **#119 one sentence in CLAUDE.md again.** Ian Swope (https://x.com/ianfs).
+- **Our own:** CI was red on main from 26 to 30 Sep because the voice-message
+  change read a column one test fixture did not have; the file is named
+  `*_test.py` and was never in my local run. Fixed, all 15 bridge test files
+  now run by both name patterns.
+- **In review, changes requested:** Erik's tapbacks (#116/#117, answers #69):
+  opt-in, no new prompts, 673 + 146 tests green, one cross-day wrong-message
+  case to close first. Damon Janis's read-sync series (#120-#122, replaces
+  #103): sound design; a focus bug in Pin/Mute, a per-poll cost, blocking
+  Mac calls and an unhealthy state on old bridges to fix.
+
+## 2026-W39 (Mon 21 Sep to Sun 27 Sep): post due Sun 27 Sep
 
 4 PRs merged so far, from 3 people.
 

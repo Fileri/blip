@@ -58,12 +58,18 @@ what it is handed. Keep it that way.
   `read`; phone-synced via Messages in iCloud) AND newer than the local mark.
   Phone-read clears Blip within a poll; Blip-read also reaches the Mac when
   `push_read=thread` is enabled (DMs and groups, through Messages, never SQL writes).
-  Tapback rows and the self-thread never count (no Apple client badges them).
+  Complete read-state snapshots reconcile the Mac independently of the preview
+  window; local marks apply to local-only reads. The self-thread never counts.
+  Tapback rows never count toward the badge, but an incoming reaction DOES
+  participate in the read-state snapshot: Messages can mark a reaction unread
+  without changing the prior text row.
   chat.db carries GHOST is_read=0 rows years old — never trust is_read alone.
 - **Read marks are per-chat, clamped to now, and --seen-based.** A message
   can carry a FUTURE timestamp (tz skew); a mark taken from the global max
   once suppressed unrelated threads until "tomorrow". The panel passes the
-  newest VISIBLE ts (`--seen`) so mid-round-trip arrivals stay unread.
+  newest VISIBLE activity ts (`--seen`) so mid-round-trip arrivals stay unread.
+  Rich reactions carry `activity_ts`; decorated bubbles expose `seen_ts` without
+  changing their original display timestamp. Pending sends never advance it.
 - **Every stamp inside Blip is UTC; local time is a DISPLAY concern.** The
   bridge emits ISO-8601 UTC to the second (`2026-09-07T18:33:12Z`, `fmt_ts`),
   because fixed-width UTC is the one format whose LEXICAL order is
@@ -185,21 +191,28 @@ what it is handed. Keep it that way.
   with the physical modifiers still held from the hotkey, and the digits
   fired Super+Shift+<digit> binds (found the hard way, 2026-09-04). Never a
   group, never the self-thread, once per message through the `code:` ring.
-- **A per-thread read push fires on the TRANSITION, not on the poll.** Every
-  poll while a thread is open carries its `readChat` (that is what stops a
-  message landing in the open conversation from flashing unread), so
-  `pushReadArgs` gates `--chat` on `clearedUnread` — did THIS run turn unread
-  into read? Without it the Mac was told once per poll, and each telling opens
-  the conversation there, because aiming Messages' menu at one chat means
-  opening it: five ssh round trips a minute, four of them "nothing unread"
-  (measured 2026-09-08). Consequence to keep in mind: a conversation Blip
-  already considers read but Apple still counts unread is never pushed
-  per-thread; `--all` is what clears those. `push_read` defaults to `all`,
-  which pushes ONLY on the mark-all gesture — reading a thread then leaves the
-  iPhone badge alone, which looks exactly like a broken push, so `status`
-  reports the live policy as `read_push=`. The watcher field beside it is
-  `watch=`; it was called `push=` until 2.4.0 and the collision sent a
-  diagnosis the wrong way.
+- **Read sync is an acknowledged, durable action queue.** `pendingReads` in
+  state.json stores only chat ids, desired read/unread state, visible timestamps,
+  retry counters/deadlines and bounded bridge status errors. Persist BEFORE any
+  Mac mutation, then execute one due action per collector run. Never detach it.
+  A failed action survives restarts and retries with backoff (2–60 seconds).
+  `imsg read-state` returns the COMPLETE metadata-only unread snapshot; it is
+  independent of the message preview window. `read_state.py` is shared with
+  `imsg-read` so the writer and reader agree, including manual unread below
+  Apple's read cursor, old ghost rows and merged phone/email DMs.
+  Under `push_read=thread`, confirmed Mac state replaces historical local
+  read marks for DMs and for groups (Messages' groupid link). A pending intent
+  alone overrides it; a later Mac read clears a previously marked-unread Blip
+  dot. Mark-unread stays on direct messages.
+  Compare remote unread against the rendered `--seen` BEFORE updating local
+  marks. A stale read must not clear a newer inbound; recheck with `--through`
+  on the Mac. Newer explicit gestures replace old same-chat pending intents.
+  Mark-all is ordered before subsequent per-chat intents; refresh coalescing
+  never crosses an explicit gesture. Mac menu actions hold an advisory lock
+  because Messages selection is process-global. `push_read` still defaults to
+  `all`; this installation may opt into `thread` in bridge.conf. `off` suppresses
+  explicit menu read pushes too. `read_push=` reports policy; `watch=` reports
+  watcher health. Never conflate those.
 - **No message content in state.json.** `~/.local/state/blip/state.json` holds
   timestamps, counts, opaque SHA-256 toast keys, self-chat ids, and group
   metadata. It is atomic and `0600`; no message bodies are allowed. EXCEPTION
@@ -259,8 +272,8 @@ what it is handed. Keep it that way.
   "Mom" cards outvote your own "Monica Gamble" for the same number.
 - **Contact review is read-only and separate from configuration.**
   `ContactReview.qml` opens from a conversation and renders models supplied by
-  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, and exact-card details
-  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, and exact-card vCard export
+  `contact-review.ts`. Only candidates, audit, fingerprint, exact-card open, exact-card details,
+  and exact-card vCard export
   cross the Mac protocol. Handles and opaque tokens travel on bounded stdin;
   no display-name choices or appearance preferences are saved. A group offers
   its participants, never the last speaker as a stand-in for the group.
@@ -472,14 +485,8 @@ to whatever has focus otherwise.
   (SIP on, the same grant `imsg-read` already holds) is reported there.
   Nothing from that issue is in-tree; do not treat the menu-item note
   above as a claim that outbound tapbacks ship.
-- Selecting a GROUP on the Mac from Linux. `imessage://` addresses a handle;
-  a group's `chat<digits>` id has no URL form. So per-conversation read-push
-  is DMs only; groups clear through `--all`. NOT closed for good: Bluetooth MAP
-  marks a message read by setting `Read` on an `org.bluez.obex.Message1`
-  object, which needs no Mac and no URL, and might cover groups. Untested here
-  — dex's Realtek radio will not stay up long enough to pair (ROADMAP, Prior
-  art, 2026-09-09). Do not lift BlueFerry's code to try it: it is GPL and Blip
-  is MIT.
+- Mark-unread on a GROUP. That menu item addresses a
+  handle. A group read already uses Messages' `imessage:open?groupid=` link.
 
 ## Things that ARE possible (verified)
 
@@ -501,8 +508,8 @@ to whatever has focus otherwise.
     app. `imsg-read` used to read "disabled" as "nothing unread" and exit 0,
     so every push was a silent no-op unless you happened to be using
     Messages. Now it counts what Messages itself calls unread in chat.db
-    (inbound, non-tapback, `item_type=0`, newer than the chat's
-    `last_read_message_timestamp` — the Dock-badge definition) before and
+    (trailing inbound unread rows, including reactions but excluding announcements; an
+    explicit unread may sit below `last_read_message_timestamp`) before and
     after; when the menu is dormant it activates Messages for 0.7 s, clicks,
     hands focus straight back, and exits 75 with a reason unless the final
     count is zero. Partial progress or an unreadable database is not success. The collector records every push in
@@ -539,3 +546,8 @@ The composer keeps arrow/Home/End keys for native text editing; PageUp/PageDown
 select history bubbles. `ComposerInput.qml` exposes the editable accessibility
 field and draws spelling ranges supplied by `spellcheck.ts`. Draft text stays
 on bounded stdin, never argv or disk; the helper emits only UTF-16 ranges.
+
+Read-sync UI regression: `python3 scripts/test-read-ui.py` executes the shipping
+QML badge bindings and read/unread functions with synthetic data under QtTest.
+`threadsJson` must remain bound to the CURRENT threads, including optimistic
+edits; a poll-only cache allowed a 3-unread badge alongside only 2 unread rows.

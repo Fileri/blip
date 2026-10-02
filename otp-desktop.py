@@ -32,8 +32,28 @@ def activate_accessibility():
         pass  # Browser-wide manual mode remains available without AT-SPI.
 
 
-Atspi.init()
-Atspi.set_timeout(100, 100)
+def wait_for_accessibility_bus(timeout=30.0):
+    # libatspi aborts the whole process (g_error) when it cannot reach the
+    # accessibility bus, and that bus refuses connections for a moment while
+    # the shell restarts. Probe it here, where a failure is catchable.
+    deadline = time.monotonic() + timeout
+    delay = 0.25
+    while True:
+        try:
+            session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            address = session.call_sync("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+                None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 1000, None).unpack()[0]
+            Gio.DBusConnection.new_for_address_sync(address,
+                Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+                None, None).close_sync(None)
+            return True
+        except Exception:
+            if time.monotonic() + delay > deadline:
+                return False
+            time.sleep(delay)
+            delay = min(delay * 2, 4.0)
+
+
 loop = GLib.MainLoop()
 focused = None
 focus_id = str(uuid.uuid4())
@@ -409,6 +429,10 @@ def readable(_fd, condition):
 
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: loop.quit())
+    if not wait_for_accessibility_bus():
+        sys.exit(75)  # EX_TEMPFAIL: OtpAutofill.qml respawns the helper later.
+    Atspi.init()
+    Atspi.set_timeout(100, 100)
     activate_accessibility()
     listener = Atspi.EventListener.new(on_focus)
     listener.register("object:state-changed:focused")

@@ -289,6 +289,17 @@ describe("QML safety invariants", () => {
     expect(nav).toContain("Qt.ShiftModifier");
   });
 
+  test("mark as unread is a list action, not a compose jump that eats the letter u", () => {
+    expect(panel).toContain('text: "Review contact"');
+    expect(panel).toContain('text: "Mark as Unread"');
+    expect(qmlFunction("markUnread")).toContain("hostWidget.markThreadUnread");
+    expect(widget).toContain("function markThreadUnread");
+    expect(widget).toContain('--mark-unread');
+    const fn = handleTextKeySource();
+    expect(fn).toContain('text === "u"');
+    expect(fn.indexOf('text === "u"')).toBeLessThan(fn.indexOf("inThread"));
+  });
+
   test("handleTextKey runs slash, n, and 1-9 before the inThread return", () => {
     const fn = handleTextKeySource();
     expect(fn.indexOf('text === "/"')).toBeLessThan(fn.indexOf("inThread"));
@@ -521,8 +532,10 @@ describe("QML safety invariants", () => {
     expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
     expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
     expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
-    expect(panel).toContain("event.key === Qt.Key_Home || event.key === Qt.Key_End");
-    expect(panel).toContain("root.clearBubbleCursor()\n                    event.accepted = composeField.moveAtBoundary(event.key, event.modifiers)");
+    // Up/Down/Home/End move the caret and leave the selected bubble alone
+    const caretKeys = panel.slice(panel.indexOf("event.key === Qt.Key_Home || event.key === Qt.Key_End"), panel.indexOf("composeField.moveAtBoundary(event.key, event.modifiers)"));
+    expect(caretKeys).toContain("event.key === Qt.Key_Home");
+    expect(caretKeys).not.toContain("clearBubbleCursor");
     expect(panel).not.toContain("var onFirstLine");
   });
 
@@ -560,7 +573,7 @@ describe("QML safety invariants", () => {
     // Three read paths, all gated on `peeking`: the two post-load marks in
     // BlipView and readingSurface() in BarWidget (what the collector is told
     // is being read). Focus entering the compose field is the commit.
-    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen)");
+    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen, act)");
     expect(panel.split("root.markRead(root.threadRunningChat, seen)").length - 1).toBe(2);
     expect(panel).not.toContain("root.hostWidget.markThreadRead(");
     expect(panel).toContain("onActiveFocusChanged: if (activeFocus) root.commitPeek()");
@@ -721,6 +734,12 @@ test("no source file carries a merge conflict marker", () => {
 // pinned conversation's only unread signal — one unread in a pinned group
 // showed badge 1 and "nothing new in the app". The tile carries the same blue
 // dot the list rows do.
+test("the header unread count is conversations with a blue dot, not inbound rows", () => {
+  expect(widget).toContain("function unreadChatCount");
+  expect(widget).toContain("if ((Number(list[i].unread) || 0) > 0) n++");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
 test("a pinned tile shows the unread dot", () => {
   expect(panel).toContain("id: pinnedUnreadDot");
   const dot = panel.slice(panel.indexOf("id: pinnedUnreadDot"), panel.indexOf("id: pinnedUnreadDot") + 700);
@@ -851,7 +870,7 @@ test("reads require a rendered snapshot and carry its own timestamp", () => {
   expect(panel).toContain("root.markRead(root.threadRunningChat, seen)");   // through the peek gate, same `seen`
   expect(widget).toContain("s.rendered === true");
   expect(widget).toContain('return s ? String(s.seenTs || "") : ""');
-  expect(widget).toContain("function markThreadRead(chat, seen)");
+  expect(widget).toContain("function markThreadRead(chat, seen, act)");
   for (const host of ["./Panel.qml", "./BlipWindow.qml"]) {
     const src = readFileSync(new URL(host, import.meta.url), "utf8");
     expect(src).toContain("readonly property bool rendered: view.rendered");
@@ -1091,4 +1110,18 @@ describe("a multi-part send is pinned to the thread it started in", () => {
     const pump = panel.slice(panel.indexOf("function pumpFileSend"), panel.indexOf("function copyText"));
     expect(pump).not.toContain("root.active.service");
   });
+});
+
+// Poll no-op detection must follow optimistic reads, unreads and deletes too.
+// A cache assigned only by polls lets a stale result change the count without
+// updating the actual list, producing a badge with more entries than its tooltip.
+test("poll snapshots compare against the current rendered list", () => {
+  expect(widget).toContain("readonly property string threadsJson: JSON.stringify(threads)");
+  expect(widget).not.toContain("root.threadsJson =");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
+test("rendered reactions advance the visible read boundary", () => {
+  expect(panel).toContain('String(list[k].seen_ts || list[k].ts || "")');
+  expect(panel).toContain("if (list[k].pending === true || list[k].scheduled === true) continue");
 });

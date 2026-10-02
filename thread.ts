@@ -57,6 +57,8 @@ export function linkHost(url: string): string {
 export const GROUP_GAP_MINUTES = 15;
 
 export interface Bubble {
+  /** Read boundary includes reactions without moving the bubble's display time. */
+  seen_ts?: string;
   ts: string;
   /** The row's Messages GUID, which actions on this bubble aim at
    *  (tapbacks); "" when the bridge did not supply one. */
@@ -309,6 +311,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
     out.push({
       ts: m.ts,
       guid: m.guid ?? "",
+      seen_ts: m.activity_ts && m.activity_ts > m.ts ? m.activity_ts : m.ts,
       from_me: m.from_me,
       name: m.name ?? m.handle ?? "",
       // U+FFFC is the object-replacement placeholder Messages leaves where an

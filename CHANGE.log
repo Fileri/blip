@@ -33,6 +33,7 @@ PEOPLE (verified handles)
   Brad Larson       github.com/followbl     X https://x.com/followbl     (confirmed by Brad himself on #113, 2026-09-26)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
   Kb2uka            github.com/Kb2uka       X https://x.com/StudioXRadio (he said so on #91, 2026-09-18: "@StudioXRadio, tag away")
+  Chad Stovern      github.com/chadhs       X https://x.com/chadstovern  (he said so on #124, 2026-09-30)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -42,6 +43,25 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-10-02  #121 Mark as Unread / Mark as Read in the conversation menu (right-click, or U). DMs go to the Mac through
+                 Messages' own menu item and count only when chat.db agrees; groups stay local. Deployed gus, vic, fnix bridge.
+                 Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-10-02  #120 Read state syncs through a durable, verified queue: every read is saved before any Mac call, retried with
+                 backoff, and retired only when chat.db confirms it; replaces #103. Merged 10-01 (Fred's OK), deployed 10-02
+                 with the new Mac bridge (read_state.py). Watcher-alive poll restored to 60 s; snapshot cost and blocking
+                 Mac calls tracked in #125. Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-09-30  #124 blip-setup no longer drops every 2, 7 and x from bridge.conf values (tr has no \xHH escape, so host=you@192.168.x
+                 came back as 19.168.x and was written back broken). Chad Stovern, github.com/chadhs, X https://x.com/chadstovern
+                 (he said so on the PR)
+2026-09-30  #123 Up/Down/Home/End in the compose field keep the selected history bubble (closes #118). Erik Fillipsveen,
+                 github.com/Fileri, X: none found
+2026-09-30  #119 CLAUDE.md contact-review bullet reads as one sentence again. Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-30  (direct)  CI green again: imsg_test.py's fixture lacked the uti column a131ae5 reads; main was red 26-30 Sep.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-29  (direct)  Code autofill no longer crashes when the accessibility bus is unreachable. libatspi aborts the helper
+                 (SIGABRT, 10 cores on gus in one day) if it cannot connect, so otp-desktop.py now probes the bus first,
+                 with backoff for 30 s, and exits 75 instead. OtpAutofill.qml respawns a dead helper (5 s doubling to
+                 60 s), so autofill comes back without a shell restart. Fred Nix / Larry, X https://x.com/nixfred
 2026-09-27  (direct)  Install tested end to end on a fresh exe.dev Omarchy VM against the real Mac. blip-setup no longer
                  exits 1 at the very end of a scripted run (the smoke test's ssh ate the queued answers), no longer needs
                  `hostname`, prints only the packages you are missing and flags ffmpeg/mpv for voice messages. README step 1

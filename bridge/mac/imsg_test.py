@@ -61,7 +61,7 @@ class ChatProjectionTests(unittest.TestCase):
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
             CREATE TABLE attachment (
-              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT
+              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT, uti TEXT
             );
             CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
             CREATE TABLE chat_recoverable_message_join (message_id INTEGER);
@@ -104,7 +104,7 @@ class ChatProjectionTests(unittest.TestCase):
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
             CREATE TABLE attachment (
-              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT
+              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT, uti TEXT
             );
             CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
             CREATE TABLE chat_recoverable_message_join (message_id INTEGER);
@@ -112,7 +112,7 @@ class ChatProjectionTests(unittest.TestCase):
             INSERT INTO handle VALUES (1, '+15551234567');
             INSERT INTO message (ROWID, date, text, attributedBody, is_from_me, handle_id) VALUES (10, 100, '￼', NULL, 0, 1);
             INSERT INTO chat_message_join VALUES (1, 10);
-            INSERT INTO attachment VALUES (20, 'photo.HEIC', 'image/heic');
+            INSERT INTO attachment VALUES (20, 'photo.HEIC', 'image/heic', NULL);
             INSERT INTO message_attachment_join VALUES (10, 20);
         """)
         original_pins = imsg.pinned_chat_identifiers
@@ -148,7 +148,7 @@ class ChatProjectionTests(unittest.TestCase):
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
             CREATE TABLE attachment (
-              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT
+              ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT, uti TEXT
             );
             CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
             CREATE TABLE chat_recoverable_message_join (message_id INTEGER);

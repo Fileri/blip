@@ -33,9 +33,10 @@ ShellRoot {
     property string timeFormat: Quickshell.env("BLIP_DEMO_TIME_FORMAT") || "h:mm AP"
     property string dateFormat: Quickshell.env("BLIP_DEMO_DATE_FORMAT") || "MMM d"
     property string dateFormatWithYear: Quickshell.env("BLIP_DEMO_DATE_FORMAT_WITH_YEAR") || "MMM d, yyyy"
-    function refresh(deep, markRead, readChat, seen) { collector.reload() }
+    function refresh(deep, markRead, readChat, seen, unreadChat) { collector.reload() }
     function markAllRead() { }
     function markThreadRead(chat) { }
+    function markThreadUnread(chat) { }
     function showApp() { }
   }
 

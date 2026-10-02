@@ -15,6 +15,7 @@ Going through Messages means the change syncs the way any read does.
 
     imsg-read --all              mark every conversation read
     imsg-read --chat <id>        mark ONE conversation read (DM or group)
+    imsg-read --unread <handle>  mark ONE conversation unread (DMs only)
     imsg-read --status           report whether this Mac can do it at all
 
 --all leaves the Mac alone: no window is raised, no selection changes, and
@@ -23,8 +24,9 @@ way to aim the menu at one conversation is to open it, and opening it brings
 Messages to the front. That is why Blip's default only pushes the explicit
 mark-all-read gesture.
 
-Exit 0 when there was nothing to do — the menu item is disabled when nothing
-is unread, which is a free guard against pointless clicks.
+Exit 0 only after the database confirms the requested state. A disabled menu
+alone is not success. --chat accepts --through <UTC stamp> to reject a stale
+read when a newer inbound has arrived.
 
 Needs Accessibility for whatever runs it. Over Blip's ssh key that is
 /usr/libexec/sshd-keygen-wrapper, the same binary that already needs Full Disk
@@ -43,6 +45,9 @@ import importlib.util
 import stat
 from contextlib import contextmanager
 from urllib.parse import urlencode
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from read_state import read_state
 
 MENU = 'menu 1 of menu bar item "Conversation" of menu bar 1'
 TIMEOUT = 150   # the first System Events call can be a consent prompt; give it the ~2 minutes macOS gives it (Astra C#8)
@@ -94,21 +99,6 @@ def osa(script: str) -> tuple[int, str]:
 
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 
-# What Messages ITSELF still counts as unread: an inbound, non-tapback,
-# non-announcement row newer than its chat's own read cursor. That cursor
-# (chat.last_read_message_timestamp) is what "Mark All as Read" advances and
-# what the Dock badge follows; message.is_read alone carries ghosts.
-UNREAD_SQL = """
-SELECT count(DISTINCT c.ROWID)
-  FROM message m
-  JOIN chat_message_join j ON j.message_id = m.ROWID
-  JOIN chat c ON c.ROWID = j.chat_id
- WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0
-   AND (m.associated_message_type IS NULL OR m.associated_message_type = 0)
-   AND m.date > c.last_read_message_timestamp
-"""
-
-
 IMSG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imsg")
 _IMSG_MODULE = None
 
@@ -144,27 +134,41 @@ def cluster_ids(con, handle):
 
 
 def unread_on_mac(handle=None):
-    """Conversations Messages still counts as unread (see UNREAD_SQL), or None
-    when chat.db cannot be read — a guess would be worse than not knowing.
+    """Conversations read_state still counts as unread, or None when chat.db
+    cannot be read. That snapshot follows is_read, so a manual unread below
+    Apple's read cursor still counts, and so does an unread reaction.
 
     A handle is scoped to its whole conversation cluster, never to one chat
-    row: the count is the referee for the push, so it has to cover every row
-    the push can clear."""
+    row: the count is the referee for the push."""
     try:
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
         # imsg's cluster queries read their columns by name.
         con.row_factory = sqlite3.Row
         try:
-            sql, args = UNREAD_SQL, ()
-            if handle:
-                ids = cluster_ids(con, handle)
-                sql += f" AND c.chat_identifier IN ({', '.join('?' * len(ids))})"
-                args = tuple(ids)
-            return int(con.execute(sql, args).fetchone()[0])
+            rows = read_state(con)
+            if not handle:
+                return sum(1 for row in rows if row["unread"] > 0)
+            ids = set(cluster_ids(con, handle))
+            return sum(1 for row in rows if row["unread"] > 0 and (
+                row["chat"] in ids or handle in (row["aliases"] or [])
+                or any(alias in ids for alias in row["aliases"] or [])))
         finally:
             con.close()
     except Exception:
         return None
+
+
+def newer_than_seen(handle, seen):
+    """Recheck on the Mac immediately before selecting a chat for a read."""
+    from datetime import datetime, timezone
+    try:
+        boundary = int(datetime.fromisoformat(seen.replace("Z", "+00:00")).timestamp() - 978307200) * 1000000000
+        # Wire stamps have second precision; include the whole visible second.
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5) as con:
+            return any(row["latest"] >= boundary + 1000000000 for row in read_state(con)
+                       if row["chat"] == handle or handle in row["aliases"])
+    except Exception:
+        return True  # cannot safely apply a stale read
 
 
 def settle(before, handle=None, tries=8, pause=0.4):
@@ -182,6 +186,34 @@ def settle(before, handle=None, tries=8, pause=0.4):
     return after
 
 
+def settle_unread(handle=None, tries=8, pause=0.4):
+    """Wait until Messages counts this chat (or any chat) as unread."""
+    after = unread_on_mac(handle)
+    for _ in range(tries):
+        if after is None or after > 0:
+            return after
+        time.sleep(pause)
+        after = unread_on_mac(handle)
+    return after
+
+
+def report_unread(before, after, ok):
+    """Exit 0 when the chat is unread on the Mac, including already-unread."""
+    if before is None or after is None:
+        sys.stderr.write("imsg-read: cannot verify read state in chat.db\n")
+        sys.exit(75)
+    if after > (before or 0):
+        print(f"marked ({before} -> {after} unread)")
+        return
+    if after > 0:
+        print("already unread")
+        return
+    why = ("Mark as Unread stayed disabled even after waking Messages, so the click could not land"
+           if not ok else "Mark as Unread was clicked but the chat is still read")
+    sys.stderr.write(f"imsg-read: {why}\n")
+    sys.exit(75)
+
+
 def report(before, after, ok, what):
     """Acknowledge only a verified zero unread count in the requested scope.
 
@@ -189,8 +221,8 @@ def report(before, after, ok, what):
     successful click can precede database writes. Neither proves completion;
     unavailable verification or a partially cleared count must remain failures.
     """
-    if after is None:
-        sys.stderr.write("imsg-read: could not verify read state in chat.db\n")
+    if after is None or (before is None and after != 0):
+        sys.stderr.write("imsg-read: cannot verify read state in chat.db\n")
         sys.exit(75)
     if after == 0:
         print("nothing unread" if before == 0 else "marked (0 unread)")
@@ -375,26 +407,46 @@ def main() -> None:
         report(before, settle(before) if ok else before, ok, "Mark All as Read")
         return
 
-    if argv[0] == "--chat":
+    if argv[0] in ("--chat", "--unread"):
         if len(argv) < 2:
-            sys.stderr.write("imsg-read: --chat needs a handle\n")
+            sys.stderr.write("imsg-read: action needs a handle\n")
             sys.exit(64)
-        before = unread_on_mac(argv[1])
-        if before == 0:
-            print("nothing unread")     # and no reason to pull Messages forward
+        handle = argv[1]
+        want_unread = argv[0] == "--unread"
+        before = unread_on_mac(handle)
+        # Idempotency avoids opening an already-unread chat (which reads it)
+        # and prevents polling from repeatedly stealing focus.
+        if before is not None and ((before > 0) == want_unread):
+            print("already unread" if want_unread else "nothing unread")
             return
+        if not want_unread and "--through" in argv:
+            i = argv.index("--through")
+            if i + 1 >= len(argv) or newer_than_seen(handle, argv[i + 1]):
+                sys.stderr.write("imsg-read: newer inbound arrived; leaving it unread\n")
+                sys.exit(75)
         prev = frontmost()
         try:
-            why = select_chat(argv[1])
+            why = select_chat(handle)
             if why:
                 sys.stderr.write(f"imsg-read: {why}\n")
                 sys.exit(64)
-            # Never toggle: a conversation already read offers Mark as Unread.
-            ok, err = click("Mark as Read")
+            item = "Mark as Unread" if want_unread else "Mark as Read"
+            ok, err = click(item)
+            # A disabled menu is dormant while Messages is in the background.
+            # Wake it and click once more; a real error still fails immediately.
+            if not ok and not err:
+                wake_messages()
+                ok, err = click(item)
             if err:
                 sys.stderr.write(f"imsg-read: {err}\n")
                 sys.exit(1)
-            report(before, settle(before, argv[1]), ok, "Mark as Read")
+            # Opening can itself read the chat. Always check the database,
+            # even when the menu was absent, disabled, or the count unknown.
+            after = settle_unread(handle) if want_unread else settle(before, handle)
+            if want_unread:
+                report_unread(before, after, ok)
+            else:
+                report(before, after, ok, item)
         finally:
             restore_front(prev)
         return

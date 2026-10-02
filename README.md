@@ -120,6 +120,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - contact photo (from the Mac's Contacts), a group's own photo from Messages when it has one, or initials · name, preview, time
 - **pinned conversations mirrored from Messages on the Mac**, kept in the same order at the top (read-only)
 - **blue dot** that stays until you open *that* conversation — iMessage semantics, not "I glanced at the list"
+- **mark as unread** — right-click a row, or `U` in the list; DMs also click Messages' own menu on the Mac so the phone can follow
 - groups titled the way Messages.app titles them: the group's name, else its members
 
 </td>
@@ -827,20 +828,26 @@ poll. Yes, that shipped once.
 
 **Unread is a ledger, not a window.** The latest 150 rows are enough for normal
 previews, but unread counts and oldest-unread timestamps live in a metadata-only
-per-chat ledger. Blip expands the fetch to cover new arrivals and the oldest
-outstanding unread, then rebuilds exact counts from that range. An unread cannot
-fall off the preview window or remain counted after deletion.
+per-chat ledger. The Mac's complete read-state snapshot refreshes this ledger
+without fetching message bodies. Older bridges fall back to expanding the fetch
+to cover new arrivals and outstanding unread. An unread cannot fall off the
+preview window or remain counted after deletion.
 
-**Reads reach the Mac through its menu bar.** Nothing writes `is_read` into
-`chat.db` — that would not sync to your phone. Instead *mark all read* has the
-Mac click Messages' own **Conversation ▸ Mark All as Read**, and Messages does
-the syncing. One catch, found the hard way: AppKit only validates an app's
-menus while that app is active, so with Messages in the background every item
-in that menu reports *disabled* — which used to read as "nothing unread" and
-silently did nothing. Blip now checks what Messages itself counts as unread in
-`chat.db` before and after, and when the menu is dormant it activates Messages
-for well under a second, clicks, and hands focus straight back to whatever you
-had in front.
+**Reads reach the Mac through its menu bar.** Set `push_read=thread` in
+`~/.config/blip/bridge.conf` to synchronize each direct conversation you read.
+The default `all` synchronizes only the explicit mark-all gesture; `off` keeps
+read actions local. Per-thread actions briefly select the conversation in
+Messages and restore the previous app's focus. With `push_read=thread`, a
+group read reaches the Mac through Messages' groupid link, not only mark-all.
+
+Read/unread actions are saved before contacting the Mac, verified against
+Messages' database, and retried after temporary failures or reconnects.
+Permission errors stay visible in Blip until resolved. A newer inbound beyond
+the visible `--seen` timestamp cancels an old read retry so it stays unread.
+A complete metadata-only `imsg read-state` snapshot reconciles blue dots even
+for conversations outside the recent-message window. Confirmed local overrides
+are retired, allowing later Mac/iPhone changes to take effect. Both updated
+Mac tools require the sibling `read_state.py` module.
 
 `push_read` in `bridge.conf` takes three values, and the default surprises
 people: **`all`** (the default) pushes *only* on the mark-all gesture, so
